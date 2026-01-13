@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -145,6 +146,32 @@ func (ws *Workspace) PrintDiff() {
 	}
 }
 
+// Validate checks if Go source code compiles by writing to a temp file and running go build
+func Validate(path, content string) error {
+	if !strings.HasSuffix(path, ".go") {
+		return nil
+	}
+
+	tmpDir, err := os.MkdirTemp("", "go-validate-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tmpFile := filepath.Join(tmpDir, filepath.Base(path))
+	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	cmd := exec.Command("go", "build", "-o", "/dev/null", tmpFile)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("validation failed for %s: %s", path, strings.TrimSpace(string(output)))
+	}
+
+	return nil
+}
+
 // ApplyChanges writes all staged files to disk
 func (ws *Workspace) ApplyChanges() error {
 	if len(ws.StagedChanges) == 0 {
@@ -159,6 +186,9 @@ func (ws *Workspace) ApplyChanges() error {
 	for nodeID, changes := range ws.StagedChanges {
 		fmt.Printf("Applying changes for node: %s\n", nodeID)
 		for _, f := range changes.Files {
+			if err := Validate(f.Path, f.Content); err != nil {
+				return fmt.Errorf("validation failed for %s: %w", f.Path, err)
+			}
 			if err := WriteFile(f.Path, f.Content); err != nil {
 				return fmt.Errorf("failed to write %s: %w", f.Path, err)
 			}

@@ -443,3 +443,48 @@ func formatNode(n *Node) string {
 
 	return strings.Join(parts, " ")
 }
+
+// DiscoverDeps scans Go files in a node's SRC/ directory and returns
+// internal package dependencies (packages under github.com/aid/agentic/internal/*)
+func DiscoverDeps(nodePath string) ([]string, error) {
+	srcDir := filepath.Join(nodePath, "SRC")
+
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read SRC directory: %w", err)
+	}
+
+	// Regex to match import statements and extract the path
+	// Handles both single imports and grouped imports
+	importRegex := regexp.MustCompile(`"(github\.com/aid/agentic/internal/([^"]+))"`)
+
+	seen := make(map[string]bool)
+	var deps []string
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+
+		filePath := filepath.Join(srcDir, entry.Name())
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s: %w", filePath, err)
+		}
+
+		matches := importRegex.FindAllStringSubmatch(string(content), -1)
+		for _, match := range matches {
+			// match[2] contains the package path after "github.com/aid/agentic/internal/"
+			// Extract just the top-level package name (e.g., "graph" from "graph/subpkg")
+			pkgPath := match[2]
+			pkgName := strings.Split(pkgPath, "/")[0]
+
+			if !seen[pkgName] {
+				seen[pkgName] = true
+				deps = append(deps, pkgName)
+			}
+		}
+	}
+
+	return deps, nil
+}
