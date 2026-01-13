@@ -1,0 +1,12 @@
+id: api
+type: leaf
+purpose: "HTTP API handlers and routing"
+invariants:
+  - "All endpoints must validate input"
+  - "Errors must return proper HTTP status codes"
+  - "Authentication required for protected routes"
+budgets:
+  token_cap: 50000
+policies:
+  allowed_paths: ["SRC/", "TEST/"]
+  checks: ["go test ./..."]

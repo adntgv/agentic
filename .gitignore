@@ -1,0 +1,10 @@
+# Binary
+agentic
+
+# State
+.agentic/state.json
+
+# IDE
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,3 @@
+L:storage path=nodes/storage deps=[] toks=5000 ver=1
+L:core path=nodes/core deps=[storage] toks=8000 ver=1
+L:api path=nodes/api deps=[core,storage] toks=12000 ver=1

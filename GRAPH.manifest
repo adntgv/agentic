@@ -1,0 +1,10 @@
+# Agentic Graph Manifest - self-describing structure
+# Format: TYPE:ID path=PATH deps=[DEPS] toks=TOKEN_CAP ver=VERSION
+
+L:token     path=nodes/token     deps=[]                                      toks=3000  ver=1
+L:graph     path=nodes/graph     deps=[]                                      toks=10000 ver=1
+L:bundle    path=nodes/bundle    deps=[graph,token]                           toks=6000  ver=1
+L:policy    path=nodes/policy    deps=[graph,bundle,token]                    toks=5500  ver=1
+L:brain     path=nodes/brain     deps=[bundle]                                toks=8000  ver=1
+L:workspace path=nodes/workspace deps=[graph]                                 toks=10000 ver=1
+L:cli       path=nodes/cli       deps=[graph,bundle,brain,workspace,policy]   toks=18000 ver=1

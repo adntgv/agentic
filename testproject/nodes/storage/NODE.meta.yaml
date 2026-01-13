@@ -1,0 +1,11 @@
+id: storage
+type: leaf
+purpose: "Data persistence and database operations"
+invariants:
+  - "All queries must be parameterized"
+  - "Transactions must be atomic"
+budgets:
+  token_cap: 30000
+policies:
+  allowed_paths: ["SRC/"]
+  checks: ["go test ./..."]

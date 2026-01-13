@@ -1,0 +1,15 @@
+id: bundle
+type: leaf
+purpose: "Build context bundles for brain prompts from node content"
+invariants:
+  - "Deterministic file ordering (sorted paths)"
+  - "Exclude binary files and build artifacts"
+  - "Include dependency contracts"
+  - "Bundle hash must be reproducible"
+budgets:
+  token_cap: 6000
+policies:
+  allowed_paths:
+    - "SRC/"
+  checks:
+    - "go test ./internal/bundle/..."

@@ -1,0 +1,15 @@
+id: policy
+type: leaf
+purpose: "Enforce token budgets, diff scopes, and contract change policies"
+invariants:
+  - "Block changes exceeding token budget"
+  - "Reject diffs outside allowed paths"
+  - "Warn on public contract changes"
+  - "Suggest node splits when budget exceeded"
+budgets:
+  token_cap: 5500
+policies:
+  allowed_paths:
+    - "SRC/"
+  checks:
+    - "go test ./internal/policy/..."

@@ -1,0 +1,15 @@
+id: brain
+type: leaf
+purpose: "Brain adapter for Claude CLI integration and response parsing"
+invariants:
+  - "Never auto-execute without approval"
+  - "Parse structured output or extract diffs from response"
+  - "Handle CLI subprocess failures gracefully"
+  - "Prompt must include all context and constraints"
+budgets:
+  token_cap: 8000
+policies:
+  allowed_paths:
+    - "SRC/"
+  checks:
+    - "go test ./internal/brain/..."

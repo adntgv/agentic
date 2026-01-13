@@ -1,0 +1,11 @@
+id: core
+type: leaf
+purpose: "Core business logic and domain models"
+invariants:
+  - "Business rules must be validated"
+  - "Domain objects must be immutable"
+budgets:
+  token_cap: 40000
+policies:
+  allowed_paths: ["SRC/"]
+  checks: ["go test ./..."]

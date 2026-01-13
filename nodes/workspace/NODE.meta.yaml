@@ -1,0 +1,15 @@
+id: workspace
+type: leaf
+purpose: "Workspace state management with git integration for checkpoints and rollback"
+invariants:
+  - "Create checkpoint before applying changes"
+  - "Rollback must restore exact previous state"
+  - "Staged diffs must be explicit (no auto-merge)"
+  - "Diff parsing must handle all unified diff formats"
+budgets:
+  token_cap: 10000
+policies:
+  allowed_paths:
+    - "SRC/"
+  checks:
+    - "go test ./internal/workspace/..."

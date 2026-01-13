@@ -1,0 +1,15 @@
+id: cli
+type: leaf
+purpose: "CLI commands and interactive REPL for user interaction"
+invariants:
+  - "All destructive operations require confirmation"
+  - "Interactive mode shows diff before apply"
+  - "Commands are discoverable via help"
+  - "REPL maintains node context across commands"
+budgets:
+  token_cap: 18000
+policies:
+  allowed_paths:
+    - "SRC/"
+  checks:
+    - "go test ./internal/cli/..."

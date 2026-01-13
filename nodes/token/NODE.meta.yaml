@@ -1,0 +1,14 @@
+id: token
+type: leaf
+purpose: "Token estimation and budget management for context window sizing"
+invariants:
+  - "Conservative estimates (upper bound, ~4 chars per token)"
+  - "Support multiple model budgets (Claude, GPT-4, etc.)"
+  - "Never underestimate - overestimation is safe"
+budgets:
+  token_cap: 3000
+policies:
+  allowed_paths:
+    - "SRC/"
+  checks:
+    - "go test ./internal/token/..."

@@ -1,0 +1,15 @@
+id: graph
+type: leaf
+purpose: "Graph engine for manifest parsing, dependency resolution, and DAG operations"
+invariants:
+  - "Detect cycles in dependency graph"
+  - "Topological sort must be deterministic"
+  - "Manifest format must be compact (one line per node)"
+  - "Support both leaf and composite node types"
+budgets:
+  token_cap: 10000
+policies:
+  allowed_paths:
+    - "SRC/"
+  checks:
+    - "go test ./internal/graph/..."
