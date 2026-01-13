@@ -3,10 +3,12 @@ package cli
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/aid/agentic/internal/brain"
 	"github.com/aid/agentic/internal/bundle"
 	"github.com/aid/agentic/internal/graph"
+	"github.com/aid/agentic/internal/token"
 	"github.com/aid/agentic/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -387,8 +389,67 @@ func runEnter(nodeID string) error {
 
 func runSplit(nodeID string) error {
 	fmt.Printf("Split protocol for node: %s\n", nodeID)
-	fmt.Println("This will convert a leaf node into a composite with smaller children.")
-	fmt.Println("Not yet implemented.")
+
+	// Load graph
+	g, err := graph.Load("GRAPH.manifest")
+	if err != nil {
+		return err
+	}
+
+	// Get the node
+	node := g.GetNode(nodeID)
+	if node == nil {
+		return fmt.Errorf("node not found: %s", nodeID)
+	}
+
+	// Build bundle
+	b, err := bundle.Build(node)
+	if err != nil {
+		return fmt.Errorf("failed to build bundle: %w", err)
+	}
+
+	// Check token budget
+	totalTokens := b.EstimateTokens()
+	tokenCap := 0
+	if node.Meta != nil && node.Meta.Budgets.TokenCap > 0 {
+		tokenCap = node.Meta.Budgets.TokenCap
+	}
+
+	fmt.Printf("\nBundle tokens: %d\n", totalTokens)
+	if tokenCap > 0 {
+		fmt.Printf("Token budget:  %d\n", tokenCap)
+	}
+
+	// If over budget, list files with token counts
+	if tokenCap > 0 && totalTokens > tokenCap {
+		fmt.Printf("\nNode exceeds token budget by %d tokens.\n", totalTokens-tokenCap)
+		fmt.Println("\nFiles by token count:")
+
+		// Build list of files with token counts
+		type fileTokens struct {
+			path   string
+			tokens int
+		}
+		var files []fileTokens
+		for path, content := range b.Files {
+			tokens := token.EstimateString(content)
+			files = append(files, fileTokens{path: path, tokens: tokens})
+		}
+
+		// Sort by token count descending
+		sort.Slice(files, func(i, j int) bool {
+			return files[i].tokens > files[j].tokens
+		})
+
+		for _, f := range files {
+			fmt.Printf("  %6d  %s\n", f.tokens, f.path)
+		}
+
+		fmt.Println("\nConsider splitting this node into smaller sub-nodes.")
+	} else {
+		fmt.Println("\nNode is within token budget. No split required.")
+	}
+
 	return nil
 }
 

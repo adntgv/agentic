@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -146,27 +145,18 @@ func (ws *Workspace) PrintDiff() {
 	}
 }
 
-// Validate checks if Go source code compiles by writing to a temp file and running go build
+// Validate checks if Go source code is syntactically valid using gofmt
 func Validate(path, content string) error {
 	if !strings.HasSuffix(path, ".go") {
 		return nil
 	}
 
-	tmpDir, err := os.MkdirTemp("", "go-validate-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	tmpFile := filepath.Join(tmpDir, filepath.Base(path))
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	cmd := exec.Command("go", "build", "-o", "/dev/null", tmpFile)
+	// Use gofmt to check syntax (works without full project context)
+	cmd := exec.Command("gofmt", "-e")
+	cmd.Stdin = strings.NewReader(content)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("validation failed for %s: %s", path, strings.TrimSpace(string(output)))
+		return fmt.Errorf("syntax error in %s: %s", path, strings.TrimSpace(string(output)))
 	}
 
 	return nil
