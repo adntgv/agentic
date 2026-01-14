@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"regexp"
@@ -33,8 +35,41 @@ type ClaudeResponse struct {
 	CostUSD   float64 `json:"cost_usd,omitempty"`
 }
 
-// Call sends a request to Claude Code and returns file outputs
+// BrainAdapter defines the interface for AI adapters
+type BrainAdapter interface {
+	Call(request string, b *bundle.Bundle) (*Response, error)
+}
+
+// ClaudeAdapter implements BrainAdapter for Claude CLI
+type ClaudeAdapter struct{}
+
+// GeminiAdapter implements BrainAdapter for Gemini (placeholder)
+type GeminiAdapter struct{}
+
+// CodexAdapter implements BrainAdapter for Codex (placeholder)
+type CodexAdapter struct{}
+
+// GetAdapter returns a BrainAdapter by name
+func GetAdapter(name string) BrainAdapter {
+	switch name {
+	case "claude":
+		return &ClaudeAdapter{}
+	case "gemini":
+		return &GeminiAdapter{}
+	case "codex":
+		return &CodexAdapter{}
+	default:
+		return nil
+	}
+}
+
+// Call sends a request using the default adapter (Claude)
 func Call(request string, b *bundle.Bundle) (*Response, error) {
+	return (&ClaudeAdapter{}).Call(request, b)
+}
+
+// Call sends a request to Claude Code and returns file outputs
+func (a *ClaudeAdapter) Call(request string, b *bundle.Bundle) (*Response, error) {
 	prompt := BuildPrompt(request, b)
 
 	if _, err := exec.LookPath("claude"); err != nil {
@@ -78,13 +113,34 @@ func Call(request string, b *bundle.Bundle) (*Response, error) {
 func BuildPrompt(request string, b *bundle.Bundle) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are an AI assistant helping to modify code.\n\n")
+	sb.WriteString(`You are an AI assistant modifying code files.
 
-	sb.WriteString("## User Request\n\n")
+CRITICAL OUTPUT RULES - VIOLATIONS WILL CAUSE ERRORS:
+1. Output ONLY the file format below - NO markdown fences, NO explanations
+2. Return COMPLETE files - never truncate, never use "..." or "// rest unchanged"
+3. If a file needs no changes, do not include it
+4. Every === FILE: MUST have a matching === END FILE ===
+
+REQUIRED OUTPUT FORMAT:
+=== FILE: path/to/file.go ===
+package main
+
+// complete file content here - every single line
+=== END FILE ===
+
+STRICTLY FORBIDDEN (will cause parse errors):
+- ` + "`" + "`" + "`" + ` markdown code fences anywhere in output
+- Partial files or "// ... rest of file unchanged"
+- Explanatory text outside the === FILE: format
+- Starting response with anything other than === FILE:
+
+`)
+
+	sb.WriteString("USER REQUEST:\n")
 	sb.WriteString(request)
 	sb.WriteString("\n\n")
 
-	sb.WriteString("## Current Files\n\n")
+	sb.WriteString("CURRENT FILES:\n\n")
 
 	// List files with their content
 	var paths []string
@@ -95,38 +151,73 @@ func BuildPrompt(request string, b *bundle.Bundle) string {
 
 	for _, p := range paths {
 		content := b.Files[p]
-		lang := extToLang(p)
-		sb.WriteString(fmt.Sprintf("### %s\n```%s\n%s\n```\n\n", p, lang, content))
+		sb.WriteString(fmt.Sprintf("--- %s ---\n%s\n--- END %s ---\n\n", p, content, p))
 	}
 
 	if b.Meta != nil {
-		sb.WriteString("## Constraints\n\n")
-		sb.WriteString(fmt.Sprintf("**Purpose:** %s\n\n", b.Meta.Purpose))
+		sb.WriteString("CONSTRAINTS:\n")
+		sb.WriteString(fmt.Sprintf("Purpose: %s\n", b.Meta.Purpose))
 		if len(b.Meta.Invariants) > 0 {
-			sb.WriteString("**Invariants to maintain:**\n")
+			sb.WriteString("Invariants:\n")
 			for _, inv := range b.Meta.Invariants {
 				sb.WriteString(fmt.Sprintf("- %s\n", inv))
 			}
-			sb.WriteString("\n")
 		}
+		sb.WriteString("\n")
 	}
-
-	sb.WriteString("## Instructions\n\n")
-	sb.WriteString("1. Make the requested changes\n")
-	sb.WriteString("2. Return the COMPLETE updated file(s)\n")
-	sb.WriteString("3. Use this exact format for each file:\n\n")
-	sb.WriteString("```\n")
-	sb.WriteString("=== FILE: path/to/file.go ===\n")
-	sb.WriteString("<complete file content here>\n")
-	sb.WriteString("=== END FILE ===\n")
-	sb.WriteString("```\n\n")
-	sb.WriteString("Only include files that need changes. Return complete file contents, not diffs.\n")
 
 	return sb.String()
 }
 
+// sanitizeOutput cleans up common LLM output issues
+func sanitizeOutput(raw string) string {
+	// Strip markdown fences wrapping entire output
+	raw = strings.TrimPrefix(raw, "```go\n")
+	raw = strings.TrimPrefix(raw, "```\n")
+	raw = strings.TrimSuffix(raw, "\n```")
+	raw = strings.TrimSuffix(raw, "```")
+
+	// Remove leading text before first === FILE:
+	if idx := strings.Index(raw, "=== FILE:"); idx > 0 {
+		raw = raw[idx:]
+	}
+
+	return strings.TrimSpace(raw)
+}
+
+// detectTruncation checks if output was truncated mid-file
+func detectTruncation(content string) (bool, string) {
+	fileStarts := strings.Count(content, "=== FILE:")
+	fileEnds := strings.Count(content, "=== END FILE ===")
+	if fileStarts != fileEnds {
+		return true, fmt.Sprintf("incomplete output: %d files started, %d ended", fileStarts, fileEnds)
+	}
+	return false, ""
+}
+
+// validateGoSyntax checks Go files for syntax errors
+func validateGoSyntax(path, content string) error {
+	if !strings.HasSuffix(path, ".go") {
+		return nil
+	}
+	fset := token.NewFileSet()
+	_, err := parser.ParseFile(fset, path, content, parser.AllErrors)
+	if err != nil {
+		return fmt.Errorf("syntax error in %s: %w", path, err)
+	}
+	return nil
+}
+
 // ExtractFiles parses the response to extract complete file contents
 func ExtractFiles(response string, b *bundle.Bundle) (*Response, error) {
+	// Sanitize output first
+	response = sanitizeOutput(response)
+
+	// Check for truncation
+	if truncated, msg := detectTruncation(response); truncated {
+		return nil, fmt.Errorf("LLM output truncated: %s", msg)
+	}
+
 	resp := &Response{
 		Files: []FileOutput{},
 	}
@@ -143,6 +234,11 @@ func ExtractFiles(response string, b *bundle.Bundle) (*Response, error) {
 			// Remove trailing newline if present
 			content = strings.TrimSuffix(content, "\n")
 
+			// Validate Go syntax before accepting
+			if err := validateGoSyntax(path, content); err != nil {
+				return nil, err
+			}
+
 			resp.Files = append(resp.Files, FileOutput{
 				Path:    path,
 				Content: content,
@@ -153,6 +249,13 @@ func ExtractFiles(response string, b *bundle.Bundle) (*Response, error) {
 	// If no structured output found, try to find code blocks with file paths
 	if len(resp.Files) == 0 {
 		resp.Files = extractFromCodeBlocks(response, b)
+
+		// Validate extracted files too
+		for _, f := range resp.Files {
+			if err := validateGoSyntax(f.Path, f.Content); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	if len(resp.Files) == 0 {
@@ -234,6 +337,16 @@ func extToLang(path string) string {
 		return "json"
 	}
 	return ""
+}
+
+// Call returns an error indicating Gemini is not yet implemented
+func (a *GeminiAdapter) Call(request string, b *bundle.Bundle) (*Response, error) {
+	return nil, fmt.Errorf("gemini adapter not implemented yet")
+}
+
+// Call returns an error indicating Codex is not yet implemented
+func (a *CodexAdapter) Call(request string, b *bundle.Bundle) (*Response, error) {
+	return nil, fmt.Errorf("codex adapter not implemented yet")
 }
 
 // CheckAvailable checks if the Claude CLI is available

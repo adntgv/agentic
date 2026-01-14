@@ -79,7 +79,7 @@ func StartREPL() {
 				continue
 			}
 			request := strings.Join(args, " ")
-			if err := runTask(request, currentNode); err != nil {
+			if err := runTask(request, currentNode, false); err != nil {
 				fmt.Printf("Error: %v\n", err)
 			}
 
@@ -99,7 +99,7 @@ func StartREPL() {
 				continue
 			}
 			request := strings.Join(args, " ")
-			if err := runTask(request, currentNode); err != nil {
+			if err := runTask(request, currentNode, false); err != nil {
 				fmt.Printf("Error: %v\n", err)
 			}
 
@@ -110,7 +110,7 @@ func StartREPL() {
 
 		case "apply":
 			skipConfirm := len(args) > 0 && (args[0] == "-y" || args[0] == "--yes")
-			if err := runApply(skipConfirm); err != nil {
+			if err := runApply(skipConfirm, false); err != nil {
 				fmt.Printf("Error: %v\n", err)
 			}
 

@@ -1,8 +1,15 @@
 package policy
 
 import (
+	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/aid/agentic/internal/bundle"
@@ -22,6 +29,17 @@ type Violation struct {
 	Severity string // "error" or "warning"
 	Message  string
 }
+
+// ContractHashes stores the contract hashes for all nodes
+type ContractHashes struct {
+	Hashes map[string]string `json:"hashes"`
+}
+
+// contractHashesPath is the default path for storing contract hashes
+const contractHashesPath = ".agentic/contracts.json"
+
+// exportedSymbolPattern matches exported Go symbols (uppercase after keyword)
+var exportedSymbolPattern = regexp.MustCompile(`^(func|type|var|const)\s+(\(?[A-Z][^\s(]*)`)
 
 // Evaluate checks all policies for a node and response
 func Evaluate(node *graph.Node, b *bundle.Bundle, diff string) *Result {
@@ -202,4 +220,162 @@ func SuggestSplit(node *graph.Node, b *bundle.Bundle) []string {
 	}
 
 	return suggestions
+}
+
+// HashContracts scans Go files in nodePath for exported symbols and returns
+// a sha256 hash of the sorted signatures. Exported symbols are identifiers
+// starting with uppercase letters after 'func ', 'type ', 'var ', 'const '.
+func HashContracts(nodePath string) (string, error) {
+	var signatures []string
+
+	err := filepath.Walk(nodePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories and non-Go files
+		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+
+		// Skip test files
+		if strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+
+		fileSignatures, err := extractExportedSignatures(path)
+		if err != nil {
+			return fmt.Errorf("extracting signatures from %s: %w", path, err)
+		}
+
+		signatures = append(signatures, fileSignatures...)
+		return nil
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("walking path %s: %w", nodePath, err)
+	}
+
+	// Sort signatures for deterministic hashing
+	sort.Strings(signatures)
+
+	// Compute sha256 hash
+	combined := strings.Join(signatures, "\n")
+	hash := sha256.Sum256([]byte(combined))
+	return hex.EncodeToString(hash[:]), nil
+}
+
+// extractExportedSignatures extracts exported symbol signatures from a Go file
+func extractExportedSignatures(filePath string) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var signatures []string
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Check for exported symbols
+		matches := exportedSymbolPattern.FindStringSubmatch(line)
+		if len(matches) >= 3 {
+			keyword := matches[1]
+			symbol := matches[2]
+
+			// Clean up method receiver notation
+			symbol = strings.TrimPrefix(symbol, "(")
+
+			// Build signature
+			signature := fmt.Sprintf("%s %s", keyword, symbol)
+
+			// For func, include the full line to capture parameters
+			if keyword == "func" {
+				signature = extractFuncSignature(line)
+			}
+
+			signatures = append(signatures, signature)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return signatures, nil
+}
+
+// extractFuncSignature extracts a clean function signature from a func declaration line
+func extractFuncSignature(line string) string {
+	// Remove leading/trailing whitespace
+	line = strings.TrimSpace(line)
+
+	// Remove function body opening brace if present
+	if idx := strings.Index(line, "{"); idx != -1 {
+		line = strings.TrimSpace(line[:idx])
+	}
+
+	return line
+}
+
+// LoadContractHashes loads contract hashes from .agentic/contracts.json
+func LoadContractHashes() (*ContractHashes, error) {
+	data, err := os.ReadFile(contractHashesPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &ContractHashes{Hashes: make(map[string]string)}, nil
+		}
+		return nil, fmt.Errorf("reading contract hashes: %w", err)
+	}
+
+	var hashes ContractHashes
+	if err := json.Unmarshal(data, &hashes); err != nil {
+		return nil, fmt.Errorf("parsing contract hashes: %w", err)
+	}
+
+	if hashes.Hashes == nil {
+		hashes.Hashes = make(map[string]string)
+	}
+
+	return &hashes, nil
+}
+
+// SaveContractHashes saves contract hashes to .agentic/contracts.json
+func SaveContractHashes(hashes *ContractHashes) error {
+	// Ensure directory exists
+	dir := filepath.Dir(contractHashesPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("creating directory %s: %w", dir, err)
+	}
+
+	data, err := json.MarshalIndent(hashes, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling contract hashes: %w", err)
+	}
+
+	if err := os.WriteFile(contractHashesPath, data, 0644); err != nil {
+		return fmt.Errorf("writing contract hashes: %w", err)
+	}
+
+	return nil
+}
+
+// HasContractChanged compares the new hash against the stored hash for a node.
+// Returns true if the contract has changed (hashes differ or no previous hash exists).
+func HasContractChanged(nodeID, newHash string) bool {
+	hashes, err := LoadContractHashes()
+	if err != nil {
+		// If we can't load hashes, assume changed to be safe
+		return true
+	}
+
+	storedHash, exists := hashes.Hashes[nodeID]
+	if !exists {
+		// No previous hash means this is new, consider it changed
+		return true
+	}
+
+	return storedHash != newHash
 }

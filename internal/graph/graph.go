@@ -36,6 +36,13 @@ type Node struct {
 	Meta       *NodeMeta
 	Children   []*Node // resolved dependency references
 	Dependents []*Node // reverse dependencies
+
+	// For composite nodes - the nested subgraph
+	Subgraph *Graph
+	// Parent reference for nested nodes
+	Parent *Node
+	// Full qualified ID (e.g., "backend.models")
+	FullID string
 }
 
 // NodeMeta represents NODE.meta.yaml contents
@@ -60,10 +67,22 @@ type Graph struct {
 	Nodes    map[string]*Node
 	Order    []string // original order from manifest
 	RootPath string
+
+	// FlatNodes contains all nodes (including nested) with full qualified IDs
+	FlatNodes map[string]*Node
+	// FlatOrder is the order of all flattened nodes
+	FlatOrder []string
+	// Parent graph (nil for root)
+	ParentGraph *Graph
 }
 
 // Load loads a GRAPH.manifest file
 func Load(path string) (*Graph, error) {
+	return LoadWithPrefix(path, "", nil)
+}
+
+// LoadWithPrefix loads a GRAPH.manifest with an optional ID prefix for nested graphs
+func LoadWithPrefix(path string, prefix string, parent *Graph) (*Graph, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open manifest: %w", err)
@@ -71,8 +90,10 @@ func Load(path string) (*Graph, error) {
 	defer file.Close()
 
 	g := &Graph{
-		Nodes:    make(map[string]*Node),
-		RootPath: filepath.Dir(path),
+		Nodes:       make(map[string]*Node),
+		FlatNodes:   make(map[string]*Node),
+		RootPath:    filepath.Dir(path),
+		ParentGraph: parent,
 	}
 
 	scanner := bufio.NewScanner(file)
@@ -92,6 +113,13 @@ func Load(path string) (*Graph, error) {
 			return nil, fmt.Errorf("line %d: %w", lineNum, err)
 		}
 
+		// Set FullID with prefix
+		if prefix != "" {
+			node.FullID = prefix + "." + node.ID
+		} else {
+			node.FullID = node.ID
+		}
+
 		g.Nodes[node.ID] = node
 		g.Order = append(g.Order, node.ID)
 	}
@@ -100,7 +128,15 @@ func Load(path string) (*Graph, error) {
 		return nil, fmt.Errorf("error reading manifest: %w", err)
 	}
 
-	// Resolve dependencies
+	// Load subgraphs for composite nodes
+	if err := g.loadSubgraphs(); err != nil {
+		return nil, err
+	}
+
+	// Flatten all nodes (including nested)
+	g.flattenNodes()
+
+	// Resolve dependencies (using flat nodes for cross-composite refs)
 	if err := g.resolveDependencies(); err != nil {
 		return nil, err
 	}
@@ -116,6 +152,56 @@ func Load(path string) (*Graph, error) {
 	}
 
 	return g, nil
+}
+
+// loadSubgraphs recursively loads nested GRAPH.manifest files for composite nodes
+func (g *Graph) loadSubgraphs() error {
+	for _, node := range g.Nodes {
+		if node.Type != NodeTypeComposite {
+			continue
+		}
+
+		// Look for nested GRAPH.manifest
+		nestedPath := filepath.Join(g.RootPath, node.Path, "GRAPH.manifest")
+		if _, err := os.Stat(nestedPath); os.IsNotExist(err) {
+			// No nested manifest - composite without subgraph
+			continue
+		}
+
+		// Load nested graph with prefix
+		subgraph, err := LoadWithPrefix(nestedPath, node.FullID, g)
+		if err != nil {
+			return fmt.Errorf("failed to load subgraph for %s: %w", node.ID, err)
+		}
+
+		node.Subgraph = subgraph
+
+		// Set parent reference for all nested nodes
+		for _, subNode := range subgraph.Nodes {
+			subNode.Parent = node
+		}
+	}
+
+	return nil
+}
+
+// flattenNodes creates a flat view of all nodes including nested ones
+func (g *Graph) flattenNodes() {
+	// Add direct nodes
+	for _, id := range g.Order {
+		node := g.Nodes[id]
+		g.FlatNodes[node.FullID] = node
+		g.FlatOrder = append(g.FlatOrder, node.FullID)
+
+		// If composite with subgraph, add nested nodes
+		if node.Subgraph != nil {
+			for _, flatID := range node.Subgraph.FlatOrder {
+				nestedNode := node.Subgraph.FlatNodes[flatID]
+				g.FlatNodes[flatID] = nestedNode
+				g.FlatOrder = append(g.FlatOrder, flatID)
+			}
+		}
+	}
 }
 
 // parseLine parses a single line from GRAPH.manifest
@@ -304,12 +390,17 @@ func (g *Graph) TopologicalSort() ([]*Node, error) {
 	return sorted, nil
 }
 
-// GetNode returns a node by ID
+// GetNode returns a node by ID (direct children only)
 func (g *Graph) GetNode(id string) *Node {
 	return g.Nodes[id]
 }
 
-// GetLeafNodes returns all leaf nodes
+// GetFlatNode returns a node by full qualified ID (includes nested nodes)
+func (g *Graph) GetFlatNode(fullID string) *Node {
+	return g.FlatNodes[fullID]
+}
+
+// GetLeafNodes returns all leaf nodes (direct children only)
 func (g *Graph) GetLeafNodes() []*Node {
 	var leaves []*Node
 	for _, id := range g.Order {
@@ -319,6 +410,28 @@ func (g *Graph) GetLeafNodes() []*Node {
 		}
 	}
 	return leaves
+}
+
+// GetAllLeafNodes returns all leaf nodes including nested ones
+func (g *Graph) GetAllLeafNodes() []*Node {
+	var leaves []*Node
+	for _, fullID := range g.FlatOrder {
+		node := g.FlatNodes[fullID]
+		if node.Type == NodeTypeLeaf {
+			leaves = append(leaves, node)
+		}
+	}
+	return leaves
+}
+
+// GetNestedLeafNodes returns all leaf nodes under a composite node
+func (g *Graph) GetNestedLeafNodes(compositeID string) []*Node {
+	node := g.GetNode(compositeID)
+	if node == nil || node.Type != NodeTypeComposite || node.Subgraph == nil {
+		return nil
+	}
+
+	return node.Subgraph.GetAllLeafNodes()
 }
 
 // GetReverseDeps returns all nodes that depend on the given node
@@ -348,7 +461,17 @@ func (g *Graph) GetReverseDeps(nodeID string) []*Node {
 
 // Print displays the graph structure
 func (g *Graph) Print() {
-	// Find roots (nodes with no dependents)
+	// Print all nodes including nested ones
+	fmt.Println("Graph nodes:")
+	for _, id := range g.Order {
+		node := g.Nodes[id]
+		g.printNodeFlat(node)
+	}
+}
+
+// PrintTree displays the graph as a tree structure
+func (g *Graph) PrintTree() {
+	// Find roots (nodes with no dependents at the top level)
 	roots := make([]*Node, 0)
 	for _, id := range g.Order {
 		node := g.Nodes[id]
@@ -360,17 +483,51 @@ func (g *Graph) Print() {
 	if len(roots) == 0 {
 		// If no roots, just print all nodes
 		for _, id := range g.Order {
-			g.printNode(g.Nodes[id], "", true)
+			g.printNodeTree(g.Nodes[id], "", true)
 		}
 		return
 	}
 
 	for i, root := range roots {
-		g.printNode(root, "", i == len(roots)-1)
+		g.printNodeTree(root, "", i == len(roots)-1)
 	}
 }
 
-func (g *Graph) printNode(node *Node, prefix string, isLast bool) {
+func (g *Graph) printNodeFlat(node *Node) {
+	nodeType := "L"
+	if node.Type == NodeTypeComposite {
+		nodeType = "C"
+	}
+
+	indent := ""
+	if node.Parent != nil {
+		// Count nesting level
+		level := 0
+		p := node.Parent
+		for p != nil {
+			level++
+			p = p.Parent
+		}
+		indent = strings.Repeat("  ", level)
+	}
+
+	deps := ""
+	if len(node.Dependencies) > 0 {
+		deps = " deps=[" + strings.Join(node.Dependencies, ",") + "]"
+	}
+
+	fmt.Printf("%s[%s] %s (%d toks)%s\n", indent, nodeType, node.FullID, node.Tokens, deps)
+
+	// If composite with subgraph, show nested nodes
+	if node.Subgraph != nil {
+		for _, subID := range node.Subgraph.Order {
+			subNode := node.Subgraph.Nodes[subID]
+			g.printNodeFlat(subNode)
+		}
+	}
+}
+
+func (g *Graph) printNodeTree(node *Node, prefix string, isLast bool) {
 	connector := "├── "
 	if isLast {
 		connector = "└── "
@@ -381,7 +538,7 @@ func (g *Graph) printNode(node *Node, prefix string, isLast bool) {
 		nodeType = "C"
 	}
 
-	fmt.Printf("%s%s[%s] %s (%d toks)\n", prefix, connector, nodeType, node.ID, node.Tokens)
+	fmt.Printf("%s%s[%s] %s (%d toks)\n", prefix, connector, nodeType, node.FullID, node.Tokens)
 
 	newPrefix := prefix
 	if isLast {
@@ -390,9 +547,23 @@ func (g *Graph) printNode(node *Node, prefix string, isLast bool) {
 		newPrefix += "│   "
 	}
 
-	// Print dependencies
+	// Print subgraph nodes for composites
+	if node.Subgraph != nil {
+		subNodes := make([]*Node, 0, len(node.Subgraph.Order))
+		for _, id := range node.Subgraph.Order {
+			subNodes = append(subNodes, node.Subgraph.Nodes[id])
+		}
+		for i, subNode := range subNodes {
+			g.printNodeTree(subNode, newPrefix, i == len(subNodes)-1)
+		}
+	}
+
+	// Print direct dependencies
 	for i, dep := range node.Children {
-		g.printNode(dep, newPrefix, i == len(node.Children)-1)
+		// Only print deps that aren't already shown via subgraph
+		if node.Subgraph == nil || node.Subgraph.Nodes[dep.ID] == nil {
+			g.printNodeTree(dep, newPrefix, i == len(node.Children)-1)
+		}
 	}
 }
 

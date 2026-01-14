@@ -9,10 +9,23 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/aid/agentic/internal/graph"
 	"github.com/aid/agentic/internal/token"
 )
+
+// Bundle cache for avoiding redundant file reads
+var bundleCache = struct {
+	sync.RWMutex
+	entries map[string]*cacheEntry
+}{entries: make(map[string]*cacheEntry)}
+
+type cacheEntry struct {
+	bundle  *Bundle
+	modTime time.Time
+}
 
 // Bundle represents the assembled context for a brain call
 type Bundle struct {
@@ -25,21 +38,51 @@ type Bundle struct {
 	Hash      string
 }
 
+// getLatestModTime finds the most recent modification time in a directory
+func getLatestModTime(dir string) time.Time {
+	var latest time.Time
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			if info.ModTime().After(latest) {
+				latest = info.ModTime()
+			}
+		}
+		return nil
+	})
+	return latest
+}
+
 // Build creates a bundle for a node
 func Build(node *graph.Node) (*Bundle, error) {
-	b := &Bundle{
-		NodeID:    node.ID,
-		NodePath:  node.Path,
-		Files:     make(map[string]string),
-		Meta:      node.Meta,
-		Contracts: make(map[string]string),
-	}
+	cacheKey := node.Path
 
 	// Get absolute path to node and cwd for relative path calculation
 	cwd, _ := os.Getwd()
 	nodePath := node.Path
 	if !filepath.IsAbs(nodePath) {
 		nodePath = filepath.Join(cwd, nodePath)
+	}
+
+	// Check cache first
+	modTime := getLatestModTime(nodePath)
+	bundleCache.RLock()
+	if entry, ok := bundleCache.entries[cacheKey]; ok {
+		if !modTime.IsZero() && entry.modTime.Equal(modTime) {
+			bundleCache.RUnlock()
+			return entry.bundle, nil
+		}
+	}
+	bundleCache.RUnlock()
+
+	b := &Bundle{
+		NodeID:    node.ID,
+		NodePath:  node.Path,
+		Files:     make(map[string]string),
+		Meta:      node.Meta,
+		Contracts: make(map[string]string),
 	}
 
 	// Collect files from node directory
@@ -105,7 +148,41 @@ func Build(node *graph.Node) (*Bundle, error) {
 	// Calculate bundle hash
 	b.Hash = b.calculateHash()
 
+	// Store in cache
+	bundleCache.Lock()
+	bundleCache.entries[cacheKey] = &cacheEntry{
+		bundle:  b,
+		modTime: modTime,
+	}
+	bundleCache.Unlock()
+
 	return b, nil
+}
+
+// InvalidateCache removes a specific node from the cache
+func InvalidateCache(nodePath string) {
+	bundleCache.Lock()
+	delete(bundleCache.entries, nodePath)
+	bundleCache.Unlock()
+}
+
+// ClearCache removes all entries from the cache
+func ClearCache() {
+	bundleCache.Lock()
+	bundleCache.entries = make(map[string]*cacheEntry)
+	bundleCache.Unlock()
+}
+
+// CacheStats returns the number of cached entries and total size
+func CacheStats() (int, int64) {
+	bundleCache.RLock()
+	defer bundleCache.RUnlock()
+	count := len(bundleCache.entries)
+	var size int64
+	for _, e := range bundleCache.entries {
+		size += int64(e.bundle.TotalSize)
+	}
+	return count, size
 }
 
 func isBinaryExt(ext string) bool {
