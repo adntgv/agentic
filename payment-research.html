@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic — Payment System Research</title>
+<style>
+  :root { --bg: #0a0a0f; --card: #12121a; --border: #1e1e2e; --accent: #6366f1; --accent2: #818cf8; --green: #22c55e; --yellow: #eab308; --red: #ef4444; --text: #e2e8f0; --muted: #94a3b8; --dim: #64748b; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; padding: 2rem; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 2.2rem; font-weight: 800; background: linear-gradient(135deg, var(--accent), #a78bfa, #f472b6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.3rem; }
+  .subtitle { color: var(--muted); font-size: 1.05rem; margin-bottom: 2.5rem; }
+  h2 { font-size: 1.5rem; font-weight: 700; color: var(--accent2); margin: 2.5rem 0 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+  h3 { font-size: 1.15rem; font-weight: 600; color: var(--text); margin: 1.5rem 0 0.5rem; }
+  p, li { color: var(--text); font-size: 0.95rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin: 1rem 0; }
+  .card.recommended { border-color: var(--green); box-shadow: 0 0 20px rgba(34,197,94,0.1); }
+  .card.good { border-color: var(--accent); }
+  .card.meh { border-color: var(--dim); opacity: 0.85; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-left: 8px; }
+  .badge.pick { background: var(--green); color: #000; }
+  .badge.viable { background: var(--accent); color: #fff; }
+  .badge.skip { background: var(--dim); color: #fff; }
+  .badge.phase2 { background: var(--yellow); color: #000; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; margin: 1rem 0; }
+  .stat { background: var(--bg); border-radius: 8px; padding: 0.75rem; text-align: center; }
+  .stat .label { font-size: 0.7rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.1em; }
+  .stat .value { font-size: 1.1rem; font-weight: 700; margin-top: 2px; }
+  .pro { color: var(--green); } .con { color: var(--red); } .neutral { color: var(--yellow); }
+  ul { padding-left: 1.3rem; margin: 0.5rem 0; }
+  li { margin: 0.3rem 0; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
+  th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .tldr { background: linear-gradient(135deg, #1a1a2e, #16213e); border: 1px solid var(--accent); border-radius: 12px; padding: 1.5rem; margin: 2rem 0; }
+  .tldr h3 { color: var(--accent2); margin-top: 0; }
+  code { background: #1e1e2e; padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: var(--accent2); }
+  .flow { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; font-size: 0.9rem; }
+  .flow .step { background: var(--card); border: 1px solid var(--border); padding: 0.4rem 0.8rem; border-radius: 8px; }
+  .flow .arrow { color: var(--dim); }
+  .verdict { font-size: 1.1rem; font-weight: 600; margin: 1rem 0; padding: 1rem; border-radius: 8px; }
+  .verdict.yes { background: rgba(34,197,94,0.1); border-left: 4px solid var(--green); }
+  .phase-label { display: inline-block; background: var(--accent); color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; margin-right: 6px; }
+</style>
+</head>
+<body>
+
+<h1>💰 Agentic Payment System</h1>
+<p class="subtitle">Research & recommendation for the AI agent marketplace — March 2026</p>
+
+<div class="tldr">
+  <h3>🎯 TL;DR — The Recommendation</h3>
+  <p><strong>Go with a Platform Credit System (internal ledger in Supabase) + LemonSqueezy for deposits + crypto (USDC on Base) for withdrawals.</strong></p>
+  <p style="margin-top:0.8rem;">This is the fastest path that actually works. You don't need Stripe Connect. You don't need to be a money transmitter. You sell "credits" as a digital product (LemonSqueezy handles tax & compliance), manage escrow as database rows, and let agent operators withdraw as USDC. Ship in 1-2 weeks.</p>
+</div>
+
+<h2>The Core Problem</h2>
+<p>Agentic is an "Upwork for AI agents." The payment flow is:</p>
+<div class="flow">
+  <span class="step">👤 Task Poster deposits funds</span>
+  <span class="arrow">→</span>
+  <span class="step">🔒 Platform holds in escrow</span>
+  <span class="arrow">→</span>
+  <span class="step">🤖 Agent completes task</span>
+  <span class="arrow">→</span>
+  <span class="step">💸 Agent operator gets paid</span>
+</div>
+<p style="margin-top:1rem;">Key constraints: Aidyn is in Kazakhstan. Agents are bots (not humans). Agent operators could be anywhere in the world. Must be simple to implement.</p>
+
+<h2>Options Evaluated</h2>
+
+<!-- OPTION 1: STRIPE CONNECT -->
+<div class="card meh">
+  <h3>1. Stripe Connect <span class="badge skip">Skip</span></h3>
+  <div class="grid">
+    <div class="stat"><div class="label">Setup</div><div class="value con">Hard</div></div>
+    <div class="stat"><div class="label">Fees</div><div class="value">2.9% + 30¢</div></div>
+    <div class="stat"><div class="label">KZ Support</div><div class="value con">No*</div></div>
+    <div class="stat"><div class="label">Time</div><div class="value">4-8 weeks</div></div>
+    <div class="stat"><div class="label">Escrow</div><div class="value neutral">Built-in</div></div>
+  </div>
+  <p><strong>The gold standard for marketplaces — but not for us.</strong></p>
+  <ul>
+    <li class="con"><strong>Kazakhstan is NOT a supported country for Stripe accounts.</strong> You cannot create a Stripe account as a KZ-based business. You'd need a US/EU entity first (Stripe Atlas = $500 + ongoing costs).</li>
+    <li class="con">Connect requires each "seller" (agent operator) to onboard with KYC — identity verification, bank details. This is heavy friction for an AI agent marketplace.</li>
+    <li class="con">Complex integration: account types, onboarding flows, payout schedules, disputes.</li>
+    <li class="pro">Cross-border payouts to 40+ countries are excellent if you get past the entity problem.</li>
+    <li class="pro">Handles compliance, tax reporting, 1099s.</li>
+  </ul>
+  <p style="margin-top:0.5rem;color:var(--dim);">* Stripe has "cross-border payouts" that can pay TO Kazakhstan, but you can't run a Stripe platform FROM Kazakhstan without a foreign entity.</p>
+  <div class="verdict"><strong>Verdict:</strong> Overkill. Requires a US entity, weeks of integration, and the KYC flow kills the "spin up an AI agent" experience. Revisit only if Agentic scales to $100K+ GMV/month.</div>
+</div>
+
+<!-- OPTION 2: LEMONSQUEEZY -->
+<div class="card good">
+  <h3>2. LemonSqueezy (for deposits) <span class="badge viable">Use for deposits</span></h3>
+  <div class="grid">
+    <div class="stat"><div class="label">Setup</div><div class="value pro">Easy</div></div>
+    <div class="stat"><div class="label">Fees</div><div class="value">5% + 50¢</div></div>
+    <div class="stat"><div class="label">KZ Support</div><div class="value pro">Yes</div></div>
+    <div class="stat"><div class="label">Time</div><div class="value pro">1-2 days</div></div>
+    <div class="stat"><div class="label">Marketplace</div><div class="value con">No</div></div>
+  </div>
+  <p><strong>You already have it. Great for the DEPOSIT side, useless for payouts.</strong></p>
+  <ul>
+    <li class="pro">Already have API key and account. KZ is supported.</li>
+    <li class="pro">Merchant of Record — LemonSqueezy handles sales tax, VAT, compliance. You don't worry about it.</li>
+    <li class="pro">Checkout overlay is polished. Cards, PayPal, etc.</li>
+    <li class="pro">Webhook API is clean — <code>order_created</code> → credit the user's balance.</li>
+    <li class="con"><strong>NOT a marketplace platform.</strong> No split payments, no payouts to third parties. It sells YOUR products.</li>
+    <li class="con">5% + 50¢ is steep vs Stripe's 2.9% + 30¢. But the MoR saves you from tax headaches.</li>
+  </ul>
+  <p style="margin-top:0.5rem;"><strong>How to use it:</strong> Sell "Agentic Credits" as a digital product. $10 = 1000 credits. $50 = 5500 credits (bonus). User buys credits → webhook fires → Supabase balance increases. Done.</p>
+  <div class="verdict yes"><strong>Verdict:</strong> Perfect for deposits. Sell credits as a digital product. Let LemonSqueezy handle the payment complexity. Use something else for payouts.</div>
+</div>
+
+<!-- OPTION 3: CRYPTO -->
+<div class="card recommended">
+  <h3>3. Crypto / Stablecoins (for withdrawals) <span class="badge pick">Best for payouts</span></h3>
+  <div class="grid">
+    <div class="stat"><div class="label">Setup</div><div class="value neutral">Medium</div></div>
+    <div class="stat"><div class="label">Fees</div><div class="value pro">&lt;$0.01</div></div>
+    <div class="stat"><div class="label">Global</div><div class="value pro">100%</div></div>
+    <div class="stat"><div class="label">Time</div><div class="value">3-5 days</div></div>
+    <div class="stat"><div class="label">Escrow</div><div class="value">Smart contract or custodial</div></div>
+  </div>
+  <p><strong>USDC on Base is the move for agent operator payouts.</strong></p>
+  <ul>
+    <li class="pro"><strong>Perfectly fits the AI agent narrative.</strong> Agents getting paid in crypto is on-brand.</li>
+    <li class="pro">No KYC for receiving. Agent operator just provides a wallet address. Global day one.</li>
+    <li class="pro">Base (Coinbase L2) fees are ~$0.001 per transfer. Practically free.</li>
+    <li class="pro">USDC is stable, trusted, backed by Coinbase/Circle. Not a meme coin.</li>
+    <li class="pro">Programmatic payouts via ethers.js or viem — just sign and send.</li>
+    <li class="con">You need to fund a hot wallet with USDC to pay out. Cash flow management.</li>
+    <li class="con">Some agent operators may not want crypto. Offer multiple withdrawal options later.</li>
+    <li class="con">Regulatory grey area in some jurisdictions, but receiving USDC is fine virtually everywhere.</li>
+  </ul>
+  <h3>Chain Comparison</h3>
+  <table>
+    <tr><th>Chain</th><th>Tx Fee</th><th>Speed</th><th>USDC Liquidity</th><th>Vibe</th></tr>
+    <tr><td><strong>Base</strong></td><td>~$0.001</td><td>2 sec</td><td>High (Coinbase-backed)</td><td>🏆 Best fit</td></tr>
+    <tr><td>Solana</td><td>~$0.001</td><td>0.4 sec</td><td>High</td><td>Good, different ecosystem</td></tr>
+    <tr><td>Polygon</td><td>~$0.01</td><td>2 sec</td><td>High</td><td>Solid, slightly higher fees</td></tr>
+    <tr><td>Arbitrum</td><td>~$0.005</td><td>2 sec</td><td>High</td><td>Good alternative to Base</td></tr>
+  </table>
+  <p><strong>Why Base over Solana:</strong> EVM ecosystem (ethers.js, huge tooling), Coinbase on/off ramps, and agent operators can bridge to Ethereum mainnet easily. Solana is great but different tooling.</p>
+  <div class="verdict yes"><strong>Verdict:</strong> USDC on Base for withdrawals. Agent operator sets a wallet address, requests withdrawal, platform sends USDC from hot wallet. Simple, cheap, global, on-brand.</div>
+</div>
+
+<!-- OPTION 4: HYBRID = THE RECOMMENDATION -->
+<div class="card recommended">
+  <h3>4. The Hybrid: Credits + LemonSqueezy + Crypto <span class="badge pick">🏆 Recommended</span></h3>
+  <p style="font-size:1.05rem;margin:1rem 0;"><strong>This is the architecture I recommend. It's simple, works today, and scales.</strong></p>
+  
+  <h3>Architecture</h3>
+  <div class="flow">
+    <span class="step">👤 User buys credits via LemonSqueezy</span>
+    <span class="arrow">→</span>
+    <span class="step">📊 Supabase ledger updated</span>
+    <span class="arrow">→</span>
+    <span class="step">🔒 Credits locked for task (escrow)</span>
+    <span class="arrow">→</span>
+    <span class="step">✅ Task complete → credits to agent operator</span>
+    <span class="arrow">→</span>
+    <span class="step">💸 Withdraw as USDC on Base</span>
+  </div>
+
+  <h3>Supabase Schema (the whole payment system)</h3>
+  <div style="background:#1e1e2e;border-radius:8px;padding:1rem;margin:1rem 0;font-family:monospace;font-size:0.85rem;overflow-x:auto;white-space:pre;color:#e2e8f0;">
+-- Balances
+CREATE TABLE wallets (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id),
+  balance_credits BIGINT DEFAULT 0 CHECK (balance_credits >= 0),
+  pending_credits BIGINT DEFAULT 0,  -- locked in active tasks
+  lifetime_earned BIGINT DEFAULT 0,
+  withdrawal_address TEXT,           -- EVM address for USDC
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Every credit movement is a ledger entry
+CREATE TABLE ledger (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id),
+  amount BIGINT NOT NULL,            -- positive = credit, negative = debit
+  type TEXT NOT NULL,                 -- 'deposit', 'task_lock', 'task_release',
+                                     -- 'task_payment', 'withdrawal', 'refund'
+  reference_id TEXT,                  -- task_id, order_id, tx_hash
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Withdrawal requests
+CREATE TABLE withdrawals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id),
+  amount_credits BIGINT NOT NULL,
+  amount_usdc NUMERIC(18,6),         -- 1 credit = $0.01
+  destination_address TEXT NOT NULL,
+  chain TEXT DEFAULT 'base',
+  tx_hash TEXT,
+  status TEXT DEFAULT 'pending',     -- pending, processing, completed, failed
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+  </div>
+
+  <h3>How Each Piece Works</h3>
+  
+  <p><strong>Deposits (LemonSqueezy):</strong></p>
+  <ul>
+    <li>Create a "Credits" product on LemonSqueezy with variants ($10, $25, $50, $100)</li>
+    <li>User clicks "Add Credits" → LemonSqueezy checkout overlay</li>
+    <li>Webhook <code>order_created</code> → insert ledger entry + update wallet balance</li>
+    <li>LemonSqueezy handles tax, fraud, chargebacks. You just credit the account.</li>
+  </ul>
+
+  <p><strong>Escrow (Supabase, no blockchain needed):</strong></p>
+  <ul>
+    <li>Task posted with budget of 500 credits → debit 500 from poster's <code>balance_credits</code>, add to <code>pending_credits</code></li>
+    <li>Task completed → move credits from poster's <code>pending_credits</code> to agent operator's <code>balance_credits</code> (minus platform fee)</li>
+    <li>Task cancelled/disputed → refund poster's <code>pending_credits</code> back to <code>balance_credits</code></li>
+    <li>All within Supabase transactions. Atomic. No smart contracts needed.</li>
+  </ul>
+
+  <p><strong>Withdrawals (USDC on Base):</strong></p>
+  <ul>
+    <li>Agent operator sets EVM wallet address in profile</li>
+    <li>Requests withdrawal → debit credits, create withdrawal record</li>
+    <li>Backend job (cron or on-demand): signs USDC transfer from platform hot wallet</li>
+    <li>Minimum withdrawal: $5 (500 credits). Batch daily to save gas (though Base gas is negligible).</li>
+    <li>Use <code>viem</code> or <code>ethers.js</code> — ~30 lines of code to send USDC</li>
+  </ul>
+
+  <h3>Platform Revenue</h3>
+  <ul>
+    <li><strong>Platform fee:</strong> 10-15% of task value (taken when task completes, before crediting agent operator)</li>
+    <li><strong>Credit markup:</strong> Optional — sell 1000 credits for $11 instead of $10</li>
+    <li><strong>Withdrawal fee:</strong> Optional flat fee ($0.50) per withdrawal</li>
+  </ul>
+
+  <div class="grid" style="margin-top:1.5rem;">
+    <div class="stat"><div class="label">Total Fees (deposit)</div><div class="value">5% + 50¢ (LS)</div></div>
+    <div class="stat"><div class="label">Payout Cost</div><div class="value pro">&lt;$0.01</div></div>
+    <div class="stat"><div class="label">Implementation</div><div class="value pro">1-2 weeks</div></div>
+    <div class="stat"><div class="label">Global</div><div class="value pro">Day 1</div></div>
+    <div class="stat"><div class="label">Regulatory</div><div class="value pro">Low*</div></div>
+  </div>
+  <p style="color:var(--dim);font-size:0.85rem;">* You're selling digital credits (a product), not operating as a money transmitter. LemonSqueezy is the MoR. Crypto withdrawals are user-initiated. This is the lightest regulatory footprint possible.</p>
+</div>
+
+<!-- OPTION 5: PURE CRYPTO -->
+<div class="card meh">
+  <h3>5. Pure Crypto (deposits + payouts) <span class="badge skip">Too Niche</span></h3>
+  <div class="grid">
+    <div class="stat"><div class="label">Setup</div><div class="value neutral">Medium</div></div>
+    <div class="stat"><div class="label">Fees</div><div class="value pro">&lt;0.1%</div></div>
+    <div class="stat"><div class="label">Audience</div><div class="value con">Crypto-native only</div></div>
+    <div class="stat"><div class="label">Escrow</div><div class="value">Smart contract</div></div>
+  </div>
+  <ul>
+    <li class="pro">Lowest fees. Fully permissionless. Smart contract escrow is trustless.</li>
+    <li class="pro">On-chain escrow = transparent, auditable, immutable.</li>
+    <li class="con"><strong>Kills 80%+ of your potential users.</strong> Most people who'd post AI tasks don't have crypto wallets.</li>
+    <li class="con">Smart contract development + audit = expensive and slow.</li>
+    <li class="con">Wallet UX is still painful for normies despite improvements.</li>
+  </ul>
+  <div class="verdict"><strong>Verdict:</strong> Cool but premature. Maybe add as a deposit option later for crypto-native users. Don't make it the only path.</div>
+</div>
+
+<!-- OPTION 6: STRIPE DIRECT (no Connect) -->
+<div class="card meh">
+  <h3>6. Stripe Direct (via Atlas) + Manual Payouts <span class="badge skip">Overcomplicated</span></h3>
+  <ul>
+    <li>Register US LLC via Stripe Atlas ($500), get Stripe account</li>
+    <li>Accept payments via Stripe Checkout (2.9% + 30¢)</li>
+    <li>Manual payouts via Wise/PayPal to agent operators</li>
+  </ul>
+  <p>Lower fees than LemonSqueezy but you take on tax compliance, entity maintenance ($200+/yr), and manual payout overhead. Not worth it at early stage.</p>
+  <div class="verdict"><strong>Verdict:</strong> Consider when doing $50K+/month to save on fees. Not now.</div>
+</div>
+
+<h2>What Other AI Agent Platforms Do</h2>
+<div class="card">
+  <table>
+    <tr><th>Platform</th><th>Model</th><th>Notes</th></tr>
+    <tr><td><strong>OpenAI GPT Store</strong></td><td>Revenue share (planned, delayed)</td><td>Still hasn't launched payments as of early 2026. Shows how hard this is.</td></tr>
+    <tr><td><strong>Relevance AI</strong></td><td>SaaS subscription</td><td>Not a marketplace, so no agent-to-agent payments.</td></tr>
+    <tr><td><strong>CrewAI</strong></td><td>SaaS / Enterprise</td><td>No marketplace payment system.</td></tr>
+    <tr><td><strong>AutoGPT Marketplace</strong></td><td>Credits + Stripe</td><td>Closest to what we're building. Credits purchased via Stripe.</td></tr>
+    <tr><td><strong>Morpheus AI</strong></td><td>MOR token (crypto-native)</td><td>Fully on-chain. Cool but limits audience.</td></tr>
+    <tr><td><strong>Virtuals Protocol</strong></td><td>Token bonding curves</td><td>Crypto-native agent economy on Base. Interesting but complex.</td></tr>
+  </table>
+  <p style="margin-top:1rem;color:var(--muted);">The honest truth: nobody has nailed AI agent marketplace payments yet. The credit-based approach is the most common pattern that actually ships.</p>
+</div>
+
+<h2>Implementation Roadmap</h2>
+
+<div class="card">
+  <p><span class="phase-label">Phase 1</span> <strong>Credits + LemonSqueezy Deposits</strong> — Week 1</p>
+  <ul>
+    <li>Create Supabase tables (wallets, ledger, withdrawals)</li>
+    <li>Create "Agentic Credits" product on LemonSqueezy with price variants</li>
+    <li>Build webhook handler: <code>POST /webhooks/lemonsqueezy</code> → credit wallet</li>
+    <li>Build escrow logic: lock credits on task creation, release on completion</li>
+    <li>Add balance display + "Buy Credits" button to frontend</li>
+  </ul>
+</div>
+
+<div class="card">
+  <p><span class="phase-label">Phase 2</span> <strong>USDC Withdrawals</strong> — Week 2</p>
+  <ul>
+    <li>Generate platform hot wallet (store private key in env, NOT in code)</li>
+    <li>Fund hot wallet with USDC on Base</li>
+    <li>Build withdrawal request flow: set address → request amount → confirm</li>
+    <li>Build payout script: read pending withdrawals, batch send USDC</li>
+    <li>Start with manual approval, automate later</li>
+  </ul>
+</div>
+
+<div class="card">
+  <p><span class="phase-label">Phase 3</span> <strong>Polish</strong> — Week 3+</p>
+  <ul>
+    <li>Transaction history UI</li>
+    <li>Email notifications for deposits, task payments, withdrawals</li>
+    <li>Dispute resolution flow (admin can freeze/refund escrow)</li>
+    <li>Optional: accept crypto deposits (USDC on Base) for crypto-native users</li>
+    <li>Optional: Stripe as alternative deposit method (if you get Atlas entity)</li>
+  </ul>
+</div>
+
+<h2>Key Numbers</h2>
+<div class="card">
+  <table>
+    <tr><th>Metric</th><th>Value</th><th>Notes</th></tr>
+    <tr><td>Credit value</td><td>1 credit = $0.01</td><td>Simple math. 1000 credits = $10.</td></tr>
+    <tr><td>Deposit fee (you pay)</td><td>5% + $0.50</td><td>LemonSqueezy's cut. Pass to user or absorb.</td></tr>
+    <tr><td>Platform fee</td><td>10-15%</td><td>Your revenue on each task completion</td></tr>
+    <tr><td>Withdrawal min</td><td>500 credits ($5)</td><td>Prevents dust withdrawals</td></tr>
+    <tr><td>Withdrawal cost</td><td>~$0.001</td><td>Base L2 gas. Negligible.</td></tr>
+    <tr><td>Hot wallet funding</td><td>Start with $500 USDC</td><td>Enough for early payouts. Top up as needed.</td></tr>
+  </table>
+</div>
+
+<h2>Risks & Mitigations</h2>
+<div class="card">
+  <table>
+    <tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr>
+    <tr><td>LemonSqueezy shuts down / changes terms</td><td style="color:var(--yellow);">Medium</td><td>Credits are internal. Swap to Stripe (via Atlas) as deposit method. Ledger stays the same.</td></tr>
+    <tr><td>Regulatory scrutiny on crypto payouts</td><td style="color:var(--yellow);">Medium</td><td>You're not an exchange. Users withdraw their own earned credits as USDC. Add KYC for withdrawals >$1000 if needed.</td></tr>
+    <tr><td>Hot wallet compromise</td><td style="color:var(--red);">High impact, Low prob</td><td>Keep minimal balance. Use hardware wallet for large amounts. Rate-limit withdrawals.</td></tr>
+    <tr><td>LemonSqueezy 5% fee eats margins</td><td style="color:var(--yellow);">Medium</td><td>At scale, add Stripe Atlas. For now, 5% on deposits + 10-15% platform fee = still profitable.</td></tr>
+    <tr><td>Users want fiat withdrawals</td><td style="color:var(--dim);">Low (early)</td><td>USDC → fiat via Coinbase/Binance is trivial. Add Wise payouts later if demanded.</td></tr>
+  </table>
+</div>
+
+<h2>Why Not Just [X]?</h2>
+<div class="card">
+  <p><strong>"Why not just Stripe?"</strong> — Kazakhstan. No Stripe accounts without a foreign entity. Stripe Atlas adds $500 upfront + complexity. LemonSqueezy gets you live today.</p>
+  <p style="margin-top:0.8rem;"><strong>"Why not just PayPal?"</strong> — PayPal marketplace (Braintree) requires a US entity too. PayPal personal is unreliable for business. Frozen accounts are legendary.</p>
+  <p style="margin-top:0.8rem;"><strong>"Why not on-chain escrow?"</strong> — Smart contract development + audit is weeks of work and thousands in cost. A Supabase transaction does the same thing for your use case. You can always add on-chain escrow later as a trust signal.</p>
+  <p style="margin-top:0.8rem;"><strong>"Why not bank transfers?"</strong> — Try sending $15 to a developer in Nigeria via bank transfer. SWIFT fees will eat the entire payment. Crypto solves this.</p>
+  <p style="margin-top:0.8rem;"><strong>"Why credits and not direct payments?"</strong> — Credits decouple deposits from payouts. You can accept fiat in and pay crypto out. You control the float. You can add features (bonuses, referral credits, promotional credits) trivially. And legally, selling digital credits is much simpler than operating a payment network.</p>
+</div>
+
+<div class="tldr" style="margin-top:3rem; background: linear-gradient(135deg, #0a2e1a, #0a1e2e);">
+  <h3>🚀 Final Answer</h3>
+  <p style="font-size:1.05rem;"><strong>LemonSqueezy deposits → Supabase credit ledger → USDC on Base withdrawals.</strong></p>
+  <p style="margin-top:0.8rem;">It's simple. It works from Kazakhstan. It's global from day one. It fits the AI agent brand. It ships in 2 weeks. And it doesn't require a law degree to set up.</p>
+  <p style="margin-top:0.8rem;">Start here. Evolve when the numbers demand it.</p>
+</div>
+
+<p style="text-align:center;color:var(--dim);margin-top:3rem;font-size:0.85rem;">
+  Generated by Claw 🧊 — March 3, 2026
+</p>
+
+</body>
+</html>

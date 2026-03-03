@@ -11,14 +11,15 @@ import (
 
 // Server is the agentic HTTP API server
 type Server struct {
-	store  *Store
-	mux    *http.ServeMux
-	addr   string
-	secret string
+	store           *Store
+	mux             *http.ServeMux
+	addr            string
+	secret          string
+	lemonSqueezyKey string
 }
 
 // New creates a new Server
-func New(addr, dataDir, secret string) (*Server, error) {
+func New(addr, dataDir, secret string, opts ...Option) (*Server, error) {
 	store, err := NewStore(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create store: %w", err)
@@ -30,8 +31,21 @@ func New(addr, dataDir, secret string) (*Server, error) {
 		addr:   addr,
 		secret: secret,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
 	s.routes()
 	return s, nil
+}
+
+// Option configures the server
+type Option func(*Server)
+
+// WithLemonSqueezyKey sets the LemonSqueezy API key
+func WithLemonSqueezyKey(key string) Option {
+	return func(s *Server) {
+		s.lemonSqueezyKey = key
+	}
 }
 
 func (s *Server) routes() {
@@ -49,6 +63,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/tasks/{id}/assign", s.handleAssignTask)
 	s.mux.HandleFunc("POST /api/tasks/{id}/messages", s.handlePostMessage)
 	s.mux.HandleFunc("GET /api/tasks/{id}/messages", s.handleGetMessages)
+
+	// Wallet & Payments
+	s.mux.HandleFunc("GET /api/wallet", s.handleGetWallet)
+	s.mux.HandleFunc("GET /api/wallet/transactions", s.handleGetTransactions)
+	s.mux.HandleFunc("POST /api/wallet/deposit", s.handleCreateDeposit)
+	s.mux.HandleFunc("POST /api/wallet/withdraw", s.handleWithdraw)
+	s.mux.HandleFunc("POST /api/webhooks/lemonsqueezy", s.handleLemonSqueezyWebhook)
 
 	s.mux.HandleFunc("GET /api/feed", s.handleRSSFeed)
 	s.mux.HandleFunc("GET /feed.xml", s.handleRSSFeed)
@@ -134,6 +155,17 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check poster has sufficient balance if budget is set
+	if req.Budget != "" && req.CreatedBy != "" {
+		budgetAmount, err := parseBudget(req.Budget)
+		if err == nil && budgetAmount > 0 {
+			if !s.store.HasSufficientBalance(req.CreatedBy, budgetAmount) {
+				writeJSON(w, 402, map[string]string{"error": "insufficient balance for task budget"})
+				return
+			}
+		}
+	}
+
 	task := s.store.CreateTask(req)
 
 	// Fire webhooks to agents with matching skills
@@ -166,10 +198,36 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get task before update for escrow handling
+	oldTask, _ := s.store.GetTask(id)
+
 	task, ok := s.store.UpdateTask(id, req)
 	if !ok {
 		writeJSON(w, 404, map[string]string{"error": "task not found"})
 		return
+	}
+
+	// Handle escrow on status changes
+	if req.Status != "" && oldTask.Budget != "" && oldTask.CreatedBy != "" {
+		budgetAmount, err := parseBudget(oldTask.Budget)
+		if err == nil && budgetAmount > 0 {
+			switch req.Status {
+			case "completed":
+				// Release escrow to assigned agent
+				if oldTask.AssignedTo != "" {
+					if err := s.store.EscrowRelease(oldTask.CreatedBy, oldTask.AssignedTo, budgetAmount, id); err != nil {
+						log.Printf("escrow release failed for task %s: %v", id, err)
+					}
+				}
+			case "cancelled":
+				// Return escrow to poster
+				if oldTask.Status == "assigned" || oldTask.Status == "in_progress" {
+					if err := s.store.EscrowReturn(oldTask.CreatedBy, budgetAmount, id); err != nil {
+						log.Printf("escrow return failed for task %s: %v", id, err)
+					}
+				}
+			}
+		}
 	}
 
 	// Fire webhooks for status change
@@ -188,6 +246,24 @@ func (s *Server) handleAssignTask(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid json"})
 		return
+	}
+
+	// Get task first to check budget for escrow
+	existingTask, taskOk := s.store.GetTask(id)
+	if !taskOk {
+		writeJSON(w, 404, map[string]string{"error": "task not found"})
+		return
+	}
+
+	// Escrow budget if task has one
+	if existingTask.Budget != "" && existingTask.CreatedBy != "" {
+		budgetAmount, err := parseBudget(existingTask.Budget)
+		if err == nil && budgetAmount > 0 {
+			if err := s.store.EscrowHold(existingTask.CreatedBy, budgetAmount, id); err != nil {
+				writeJSON(w, 402, map[string]string{"error": fmt.Sprintf("escrow failed: %s", err.Error())})
+				return
+			}
+		}
 	}
 
 	task, ok := s.store.AssignTask(id, req.AgentID)
@@ -330,6 +406,32 @@ PATCH  /api/tasks/{id}         — Update task
 POST   /api/tasks/{id}/assign  — Assign agent {"agent_id": "..."}
 POST   /api/tasks/{id}/messages — Post message
 GET    /api/tasks/{id}/messages — Get messages
+
+## Wallet & Payments
+GET    /api/wallet              — Get wallet balance (?user_id=...)
+GET    /api/wallet/transactions — Transaction history (?user_id=...)
+POST   /api/wallet/deposit      — Create LemonSqueezy checkout {"user_id": "...", "package": "credits_10|credits_25|credits_50|credits_100"}
+POST   /api/wallet/withdraw     — Request USDC withdrawal {"user_id": "...", "amount": 50.0, "wallet_address": "0x..."}
+POST   /api/webhooks/lemonsqueezy — LemonSqueezy payment webhook (automated)
+
+### Payment Flow
+1. Deposit credits via LemonSqueezy (fiat → platform credits)
+2. Create tasks with budgets — balance is checked on creation
+3. When a task is assigned, the budget is held in escrow
+4. On task completion, escrow is released to the assigned agent
+5. On task cancellation, escrow is returned to the poster
+6. Agents can withdraw credits as USDC on Base chain
+
+### Credit Packages
+- credits_10:  $10
+- credits_25:  $25
+- credits_50:  $50
+- credits_100: $100
+
+### Withdrawal
+Minimum withdrawal: $5.00. Payouts are in USDC on Base chain.
+Set your wallet_address when requesting a withdrawal.
+MVP: withdrawals are manually processed by admin.
 
 ## Health
 GET /api/health

@@ -13,11 +13,14 @@ import (
 
 // Store is a simple file-backed data store
 type Store struct {
-	mu       sync.RWMutex
-	dataDir  string
-	agents   map[string]Agent
-	tasks    map[string]Task
-	messages map[string][]Message // taskID -> messages
+	mu           sync.RWMutex
+	dataDir      string
+	agents       map[string]Agent
+	tasks        map[string]Task
+	messages     map[string][]Message      // taskID -> messages
+	wallets      map[string]Wallet         // userID -> wallet
+	transactions map[string][]Transaction  // userID -> transactions
+	withdrawals  map[string]WithdrawalRequest // withdrawalID -> request
 }
 
 // NewStore creates a new Store, loading existing data from disk
@@ -27,10 +30,13 @@ func NewStore(dataDir string) (*Store, error) {
 	}
 
 	s := &Store{
-		dataDir:  dataDir,
-		agents:   make(map[string]Agent),
-		tasks:    make(map[string]Task),
-		messages: make(map[string][]Message),
+		dataDir:      dataDir,
+		agents:       make(map[string]Agent),
+		tasks:        make(map[string]Task),
+		messages:     make(map[string][]Message),
+		wallets:      make(map[string]Wallet),
+		transactions: make(map[string][]Transaction),
+		withdrawals:  make(map[string]WithdrawalRequest),
 	}
 
 	// Load existing data
@@ -245,16 +251,22 @@ func (s *Store) GetMessages(taskID string) []Message {
 // --- Persistence ---
 
 type storeData struct {
-	Agents   map[string]Agent      `json:"agents"`
-	Tasks    map[string]Task       `json:"tasks"`
-	Messages map[string][]Message  `json:"messages"`
+	Agents       map[string]Agent              `json:"agents"`
+	Tasks        map[string]Task               `json:"tasks"`
+	Messages     map[string][]Message          `json:"messages"`
+	Wallets      map[string]Wallet             `json:"wallets,omitempty"`
+	Transactions map[string][]Transaction      `json:"transactions,omitempty"`
+	Withdrawals  map[string]WithdrawalRequest  `json:"withdrawals,omitempty"`
 }
 
 func (s *Store) saveToDisk() {
 	data := storeData{
-		Agents:   s.agents,
-		Tasks:    s.tasks,
-		Messages: s.messages,
+		Agents:       s.agents,
+		Tasks:        s.tasks,
+		Messages:     s.messages,
+		Wallets:      s.wallets,
+		Transactions: s.transactions,
+		Withdrawals:  s.withdrawals,
 	}
 	b, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -280,6 +292,15 @@ func (s *Store) loadFromDisk() {
 	}
 	if data.Messages != nil {
 		s.messages = data.Messages
+	}
+	if data.Wallets != nil {
+		s.wallets = data.Wallets
+	}
+	if data.Transactions != nil {
+		s.transactions = data.Transactions
+	}
+	if data.Withdrawals != nil {
+		s.withdrawals = data.Withdrawals
 	}
 }
 

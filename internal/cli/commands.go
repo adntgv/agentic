@@ -193,7 +193,8 @@ var serveCmd = &cobra.Command{
 		addr, _ := cmd.Flags().GetString("addr")
 		dataDir, _ := cmd.Flags().GetString("data")
 		secret, _ := cmd.Flags().GetString("secret")
-		return runServe(addr, dataDir, secret)
+		lsKey, _ := cmd.Flags().GetString("lemonsqueezy-key")
+		return runServe(addr, dataDir, secret, lsKey)
 	},
 }
 
@@ -226,6 +227,7 @@ func init() {
 	serveCmd.Flags().String("addr", ":8080", "listen address")
 	serveCmd.Flags().String("data", ".agentic/data", "data directory for persistence")
 	serveCmd.Flags().String("secret", "", "default webhook HMAC secret")
+	serveCmd.Flags().String("lemonsqueezy-key", "", "LemonSqueezy API key (or LEMONSQUEEZY_API_KEY env)")
 
 	initCmd.Flags().Bool("discover", false, "auto-discover packages and generate GRAPH.manifest")
 	runTaskCmd.Flags().StringP("node", "n", "", "target node for the task")
@@ -974,8 +976,15 @@ func runSplit(nodeID string) error {
 	return nil
 }
 
-func runServe(addr, dataDir, secret string) error {
-	srv, err := server.New(addr, dataDir, secret)
+func runServe(addr, dataDir, secret, lsKey string) error {
+	if lsKey == "" {
+		lsKey = os.Getenv("LEMONSQUEEZY_API_KEY")
+	}
+	var opts []server.Option
+	if lsKey != "" {
+		opts = append(opts, server.WithLemonSqueezyKey(lsKey))
+	}
+	srv, err := server.New(addr, dataDir, secret, opts...)
 	if err != nil {
 		return err
 	}
