@@ -94,7 +94,23 @@ func (s *Server) Start() error {
 			log.Printf("Platform deposit address: %s", s.crypto.PlatformAddress)
 		}
 	}
-	return http.ListenAndServe(s.addr, s.mux)
+	return http.ListenAndServe(s.addr, corsMiddleware(s.mux))
+}
+
+// corsMiddleware adds CORS headers to all responses
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Webhook-Signature")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // --- Handlers ---
