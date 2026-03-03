@@ -12,6 +12,7 @@ import (
 	"github.com/aid/agentic/internal/brain"
 	"github.com/aid/agentic/internal/bundle"
 	"github.com/aid/agentic/internal/graph"
+	"github.com/aid/agentic/internal/server"
 	"github.com/aid/agentic/internal/token"
 	"github.com/aid/agentic/internal/workspace"
 	"github.com/spf13/cobra"
@@ -184,6 +185,18 @@ var enterCmd = &cobra.Command{
 	},
 }
 
+var serveCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Start the agentic API server",
+	Long:  `Starts an HTTP server with agent registration, task management, webhooks, and RSS feed.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		addr, _ := cmd.Flags().GetString("addr")
+		dataDir, _ := cmd.Flags().GetString("data")
+		secret, _ := cmd.Flags().GetString("secret")
+		return runServe(addr, dataDir, secret)
+	},
+}
+
 var splitCmd = &cobra.Command{
 	Use:   "split [node]",
 	Short: "Split a node that exceeds token budget",
@@ -208,6 +221,11 @@ func init() {
 	rootCmd.AddCommand(undoCmd)
 	rootCmd.AddCommand(enterCmd)
 	rootCmd.AddCommand(splitCmd)
+	rootCmd.AddCommand(serveCmd)
+
+	serveCmd.Flags().String("addr", ":8080", "listen address")
+	serveCmd.Flags().String("data", ".agentic/data", "data directory for persistence")
+	serveCmd.Flags().String("secret", "", "default webhook HMAC secret")
 
 	initCmd.Flags().Bool("discover", false, "auto-discover packages and generate GRAPH.manifest")
 	runTaskCmd.Flags().StringP("node", "n", "", "target node for the task")
@@ -954,6 +972,14 @@ func runSplit(nodeID string) error {
 	}
 
 	return nil
+}
+
+func runServe(addr, dataDir, secret string) error {
+	srv, err := server.New(addr, dataDir, secret)
+	if err != nil {
+		return err
+	}
+	return srv.Start()
 }
 
 func runInteractive() {
