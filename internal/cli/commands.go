@@ -188,13 +188,13 @@ var enterCmd = &cobra.Command{
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the agentic API server",
-	Long:  `Starts an HTTP server with agent registration, task management, webhooks, and RSS feed.`,
+	Long:  `Starts an HTTP server with agent registration, task management, USDC payments on Base, and RSS feed.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		addr, _ := cmd.Flags().GetString("addr")
 		dataDir, _ := cmd.Flags().GetString("data")
 		secret, _ := cmd.Flags().GetString("secret")
-		lsKey, _ := cmd.Flags().GetString("lemonsqueezy-key")
-		return runServe(addr, dataDir, secret, lsKey)
+		useTestnet, _ := cmd.Flags().GetBool("testnet")
+		return runServe(addr, dataDir, secret, useTestnet)
 	},
 }
 
@@ -227,7 +227,7 @@ func init() {
 	serveCmd.Flags().String("addr", ":8080", "listen address")
 	serveCmd.Flags().String("data", ".agentic/data", "data directory for persistence")
 	serveCmd.Flags().String("secret", "", "default webhook HMAC secret")
-	serveCmd.Flags().String("lemonsqueezy-key", "", "LemonSqueezy API key (or LEMONSQUEEZY_API_KEY env)")
+	serveCmd.Flags().Bool("testnet", false, "use Base Sepolia testnet (or USE_TESTNET env)")
 
 	initCmd.Flags().Bool("discover", false, "auto-discover packages and generate GRAPH.manifest")
 	runTaskCmd.Flags().StringP("node", "n", "", "target node for the task")
@@ -976,14 +976,30 @@ func runSplit(nodeID string) error {
 	return nil
 }
 
-func runServe(addr, dataDir, secret, lsKey string) error {
-	if lsKey == "" {
-		lsKey = os.Getenv("LEMONSQUEEZY_API_KEY")
+func runServe(addr, dataDir, secret string, useTestnet bool) error {
+	// Build crypto config from env vars
+	cfg := server.DefaultCryptoConfig()
+
+	if rpc := os.Getenv("BASE_RPC_URL"); rpc != "" {
+		cfg.BaseRPCURL = rpc
 	}
+	if contract := os.Getenv("USDC_CONTRACT"); contract != "" {
+		cfg.USDCContract = contract
+	}
+	if pk := os.Getenv("PLATFORM_WALLET_PRIVATE_KEY"); pk != "" {
+		cfg.PlatformPrivateKey = pk
+	}
+	if pa := os.Getenv("PLATFORM_WALLET_ADDRESS"); pa != "" {
+		cfg.PlatformAddress = pa
+	}
+
+	if useTestnet || os.Getenv("USE_TESTNET") == "true" {
+		cfg.ApplyTestnet()
+	}
+
 	var opts []server.Option
-	if lsKey != "" {
-		opts = append(opts, server.WithLemonSqueezyKey(lsKey))
-	}
+	opts = append(opts, server.WithCryptoConfig(&cfg))
+
 	srv, err := server.New(addr, dataDir, secret, opts...)
 	if err != nil {
 		return err

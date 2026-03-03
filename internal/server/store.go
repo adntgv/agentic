@@ -13,14 +13,16 @@ import (
 
 // Store is a simple file-backed data store
 type Store struct {
-	mu           sync.RWMutex
-	dataDir      string
-	agents       map[string]Agent
-	tasks        map[string]Task
-	messages     map[string][]Message      // taskID -> messages
-	wallets      map[string]Wallet         // userID -> wallet
-	transactions map[string][]Transaction  // userID -> transactions
-	withdrawals  map[string]WithdrawalRequest // withdrawalID -> request
+	mu                  sync.RWMutex
+	dataDir             string
+	agents              map[string]Agent
+	tasks               map[string]Task
+	messages            map[string][]Message           // taskID -> messages
+	wallets             map[string]Wallet              // userID -> wallet
+	transactions        map[string][]Transaction       // userID -> transactions
+	withdrawals         map[string]WithdrawalRequest   // withdrawalID -> request
+	processedTxs        map[string]bool                // on-chain tx hashes already credited
+	depositAddressIndex map[string]string              // lowercase address -> userID
 }
 
 // NewStore creates a new Store, loading existing data from disk
@@ -30,13 +32,15 @@ func NewStore(dataDir string) (*Store, error) {
 	}
 
 	s := &Store{
-		dataDir:      dataDir,
-		agents:       make(map[string]Agent),
-		tasks:        make(map[string]Task),
-		messages:     make(map[string][]Message),
-		wallets:      make(map[string]Wallet),
-		transactions: make(map[string][]Transaction),
-		withdrawals:  make(map[string]WithdrawalRequest),
+		dataDir:             dataDir,
+		agents:              make(map[string]Agent),
+		tasks:               make(map[string]Task),
+		messages:            make(map[string][]Message),
+		wallets:             make(map[string]Wallet),
+		transactions:        make(map[string][]Transaction),
+		withdrawals:         make(map[string]WithdrawalRequest),
+		processedTxs:        make(map[string]bool),
+		depositAddressIndex: make(map[string]string),
 	}
 
 	// Load existing data
@@ -251,22 +255,26 @@ func (s *Store) GetMessages(taskID string) []Message {
 // --- Persistence ---
 
 type storeData struct {
-	Agents       map[string]Agent              `json:"agents"`
-	Tasks        map[string]Task               `json:"tasks"`
-	Messages     map[string][]Message          `json:"messages"`
-	Wallets      map[string]Wallet             `json:"wallets,omitempty"`
-	Transactions map[string][]Transaction      `json:"transactions,omitempty"`
-	Withdrawals  map[string]WithdrawalRequest  `json:"withdrawals,omitempty"`
+	Agents              map[string]Agent              `json:"agents"`
+	Tasks               map[string]Task               `json:"tasks"`
+	Messages            map[string][]Message          `json:"messages"`
+	Wallets             map[string]Wallet             `json:"wallets,omitempty"`
+	Transactions        map[string][]Transaction      `json:"transactions,omitempty"`
+	Withdrawals         map[string]WithdrawalRequest  `json:"withdrawals,omitempty"`
+	ProcessedTxs        map[string]bool               `json:"processed_txs,omitempty"`
+	DepositAddressIndex map[string]string             `json:"deposit_address_index,omitempty"`
 }
 
 func (s *Store) saveToDisk() {
 	data := storeData{
-		Agents:       s.agents,
-		Tasks:        s.tasks,
-		Messages:     s.messages,
-		Wallets:      s.wallets,
-		Transactions: s.transactions,
-		Withdrawals:  s.withdrawals,
+		Agents:              s.agents,
+		Tasks:               s.tasks,
+		Messages:            s.messages,
+		Wallets:             s.wallets,
+		Transactions:        s.transactions,
+		Withdrawals:         s.withdrawals,
+		ProcessedTxs:        s.processedTxs,
+		DepositAddressIndex: s.depositAddressIndex,
 	}
 	b, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -301,6 +309,12 @@ func (s *Store) loadFromDisk() {
 	}
 	if data.Withdrawals != nil {
 		s.withdrawals = data.Withdrawals
+	}
+	if data.ProcessedTxs != nil {
+		s.processedTxs = data.ProcessedTxs
+	}
+	if data.DepositAddressIndex != nil {
+		s.depositAddressIndex = data.DepositAddressIndex
 	}
 }
 

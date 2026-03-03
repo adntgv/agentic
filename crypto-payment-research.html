@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic — Crypto Payment System Research</title>
+<style>
+  :root { --bg: #0a0a0f; --surface: #12121a; --surface2: #1a1a26; --border: #2a2a3a; --text: #e0e0e8; --muted: #8888a0; --accent: #6366f1; --green: #22c55e; --red: #ef4444; --yellow: #eab308; --orange: #f97316; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+  .container { max-width: 900px; margin: 0 auto; padding: 40px 24px; }
+  h1 { font-size: 2.2em; font-weight: 800; margin-bottom: 8px; background: linear-gradient(135deg, #6366f1, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .subtitle { color: var(--muted); font-size: 1.1em; margin-bottom: 48px; }
+  h2 { font-size: 1.5em; font-weight: 700; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
+  h3 { font-size: 1.15em; font-weight: 600; margin: 28px 0 12px; color: var(--accent); }
+  p, li { color: var(--text); margin-bottom: 12px; }
+  ul, ol { padding-left: 24px; }
+  .verdict { background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(168,85,247,0.1)); border: 1px solid rgba(99,102,241,0.3); border-radius: 12px; padding: 24px; margin: 32px 0; }
+  .verdict h3 { color: #a855f7; margin-top: 0; }
+  .win { color: var(--green); font-weight: 700; }
+  .lose { color: var(--red); font-weight: 700; }
+  .neutral { color: var(--yellow); font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 0.92em; }
+  th, td { padding: 12px 14px; text-align: left; border: 1px solid var(--border); }
+  th { background: var(--surface2); font-weight: 600; color: var(--accent); white-space: nowrap; }
+  td { background: var(--surface); }
+  .tag { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 0.82em; font-weight: 600; }
+  .tag-green { background: rgba(34,197,94,0.15); color: var(--green); }
+  .tag-red { background: rgba(239,68,68,0.15); color: var(--red); }
+  .tag-yellow { background: rgba(234,179,8,0.15); color: var(--yellow); }
+  .tag-blue { background: rgba(99,102,241,0.15); color: var(--accent); }
+  .callout { background: var(--surface); border-left: 4px solid var(--accent); padding: 16px 20px; margin: 20px 0; border-radius: 0 8px 8px 0; }
+  .callout-warn { border-left-color: var(--orange); }
+  .roadmap { position: relative; padding-left: 32px; }
+  .roadmap::before { content: ''; position: absolute; left: 11px; top: 8px; bottom: 8px; width: 2px; background: var(--border); }
+  .phase { position: relative; margin-bottom: 28px; }
+  .phase::before { content: ''; position: absolute; left: -27px; top: 6px; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 3px solid var(--bg); }
+  .phase-title { font-weight: 700; font-size: 1.05em; }
+  .phase-time { color: var(--muted); font-size: 0.9em; }
+  code { background: var(--surface2); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+  .toc { background: var(--surface); border-radius: 12px; padding: 20px 28px; margin: 24px 0 40px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc ol { margin-bottom: 0; }
+  .toc li { margin-bottom: 6px; }
+  .emoji { font-size: 1.2em; }
+  @media (max-width: 600px) { table { font-size: 0.8em; } th, td { padding: 8px; } }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>🔮 Crypto Payment Research</h1>
+<p class="subtitle">Agentic — "Upwork for AI Agents" · Full crypto vs hybrid vs fiat · March 2026</p>
+
+<div class="toc">
+<strong>Contents</strong>
+<ol>
+  <li><a href="#tldr">TL;DR — The Verdict</a></li>
+  <li><a href="#tax">Tax & Compliance (Kazakhstan)</a></li>
+  <li><a href="#flows">Crypto Payment Flows</a></li>
+  <li><a href="#ux">User Experience & On-Ramps</a></li>
+  <li><a href="#examples">Existing Platforms & Protocols</a></li>
+  <li><a href="#escrow">Smart Contract Escrow</a></li>
+  <li><a href="#regulatory">Regulatory Risk</a></li>
+  <li><a href="#comparison">Head-to-Head Comparison</a></li>
+  <li><a href="#recommendation">Recommendation</a></li>
+  <li><a href="#roadmap">Implementation Roadmap</a></li>
+</ol>
+</div>
+
+<!-- ======================== TL;DR ======================== -->
+<h2 id="tldr">1. TL;DR — The Verdict</h2>
+
+<div class="verdict">
+<h3>🏆 Go Hybrid-First, Crypto-Native Architecture</h3>
+<p><strong>Start with embedded on-ramp + USDC on Base internally. Don't go "fully crypto" on day 1.</strong></p>
+<p>The architecture should be crypto-native (all internal accounting in USDC, smart contract escrow on Base), but the user-facing payment entry point should include fiat on-ramps. Here's why:</p>
+<ul>
+  <li><span class="win">Crypto wins</span> on fees (0.5–1% vs 5–8%), global access, agent-to-agent payments, and escrow flexibility</li>
+  <li><span class="lose">Crypto loses</span> on UX friction for normies and regulatory clarity</li>
+  <li><span class="win">The fix:</span> Embedded on-ramp widgets (Coinbase Onramp, Transak) let users pay with cards while you receive USDC. Best of both worlds.</li>
+  <li><span class="win">Kill LemonSqueezy</span> — it makes no sense for a marketplace. MoR is for SaaS, not escrow-based task marketplaces.</li>
+</ul>
+</div>
+
+<!-- ======================== TAX ======================== -->
+<h2 id="tax">2. Tax & Compliance — Kazakhstan</h2>
+
+<h3>Kazakhstan Crypto Tax Landscape (2026)</h3>
+<p>Kazakhstan has become surprisingly crypto-friendly, especially through the AIFC:</p>
+<ul>
+  <li><strong>AIFC Framework:</strong> The Astana International Financial Centre has a dedicated digital assets framework. Binance, Bybit, and Bitfinex are licensed there. Q1 2025 trading volume hit $1.7B through AIFC-regulated platforms.</li>
+  <li><strong>Crypto-fiat pilot:</strong> AIFC ran a joint pilot with 6 crypto exchanges and 8 banks, ~50K users — proving government willingness to embrace crypto.</li>
+  <li><strong>Personal crypto income:</strong> In Kazakhstan, individual crypto gains are taxed at 10% IIT (Individual Income Tax) on realized gains. However, enforcement on pure crypto-to-crypto transactions is minimal.</li>
+  <li><strong>Corporate:</strong> If you operate as a KZ entity handling crypto, you'd pay standard 20% CIT on profits. But operating under AIFC gives preferential treatment.</li>
+  <li><strong>VAT:</strong> Crypto transactions are currently VAT-exempt in Kazakhstan. This is a significant advantage — LemonSqueezy charges VAT where applicable, eating 20%+ in EU.</li>
+</ul>
+
+<h3>Does Avoiding a Fiat MoR Reduce Tax Burden?</h3>
+
+<div class="callout">
+<strong>Yes, significantly — but not for the reason you think.</strong><br><br>
+LemonSqueezy as MoR means they're the "seller" — they collect ~5% fee + handle VAT/sales tax remittance. Your take-home is ~90–92% of list price after their cut + tax handling.<br><br>
+With pure crypto: no MoR fee, no automatic VAT collection. <strong>But you're not "avoiding" tax — you're shifting responsibility to yourself.</strong> The real savings come from:
+<ul style="margin-top: 8px;">
+  <li>No 5% MoR fee (biggest win)</li>
+  <li>No VAT on crypto-to-crypto in KZ</li>
+  <li>Platform only takes a % as revenue → only pay tax on platform commission, not gross volume</li>
+  <li>Users in most jurisdictions self-report crypto gains</li>
+</ul>
+</div>
+
+<h3>Comparison: Fee Impact on a $100 Task</h3>
+<table>
+  <tr><th>Model</th><th>Platform fee</th><th>Payment processing</th><th>Tax overhead</th><th>Agent receives</th></tr>
+  <tr><td>LemonSqueezy (fiat)</td><td>$10 (10%)</td><td>$5 (LS 5%)</td><td>$0–20 (VAT varies)</td><td><strong>$65–85</strong></td></tr>
+  <tr><td>Hybrid (LS + crypto withdraw)</td><td>$10</td><td>$5 (LS) + $0.50 (USDC tx)</td><td>$0–20 (VAT on deposit)</td><td><strong>$65–84</strong></td></tr>
+  <tr><td>Full crypto (USDC on Base)</td><td>$10</td><td>$0.01 (Base tx)</td><td>$0 (crypto-to-crypto)</td><td><strong>$89.99</strong></td></tr>
+</table>
+<p><span class="win">Crypto saves agents ~$15–25 per $100 task.</span> That's massive for an AI agent marketplace where margins matter.</p>
+
+<!-- ======================== FLOWS ======================== -->
+<h2 id="flows">3. Crypto Payment Flows</h2>
+
+<h3>Chain Comparison</h3>
+<table>
+  <tr><th>Chain</th><th>USDC tx fee</th><th>Finality</th><th>Ecosystem</th><th>Gasless support</th><th>Verdict</th></tr>
+  <tr><td><strong>Base</strong></td><td>$0.001–0.01</td><td>~2 sec</td><td>Coinbase ecosystem, huge growth</td><td>Paymaster (ERC-4337)</td><td><span class="tag tag-green">Best choice</span></td></tr>
+  <tr><td>Arbitrum</td><td>$0.01–0.05</td><td>~1 sec</td><td>DeFi-heavy, mature</td><td>Paymaster (ERC-4337)</td><td><span class="tag tag-blue">Good backup</span></td></tr>
+  <tr><td>Polygon PoS</td><td>$0.005–0.02</td><td>~2 sec</td><td>Large, but declining mindshare</td><td>Native meta-tx</td><td><span class="tag tag-yellow">Acceptable</span></td></tr>
+  <tr><td>Solana</td><td>$0.001</td><td>~0.4 sec</td><td>Fast, different stack (Rust)</td><td>Fee payer accounts</td><td><span class="tag tag-yellow">Different stack</span></td></tr>
+</table>
+
+<p><strong>Recommendation: Base.</strong> It's Coinbase's L2 — native Coinbase Onramp integration, cheapest EVM L2, massive momentum, and Coinbase Smart Wallet works natively. Your users who have Coinbase accounts get seamless on-ramp.</p>
+
+<h3>Payment Flow Architecture</h3>
+
+<div class="callout">
+<strong>The Flow (user posts task, agent completes it):</strong>
+<ol>
+  <li><strong>Deposit:</strong> User sends USDC to platform smart contract (or uses embedded on-ramp → USDC goes directly to contract)</li>
+  <li><strong>Task assignment:</strong> Smart contract locks USDC in escrow for the assigned task</li>
+  <li><strong>Completion:</strong> User confirms completion → contract releases USDC to agent's wallet</li>
+  <li><strong>Dispute:</strong> Either party flags → funds locked, platform-controlled arbitration address resolves</li>
+  <li><strong>Platform fee:</strong> Taken automatically on release (e.g., 10% → platform wallet)</li>
+</ol>
+</div>
+
+<h3>Escrow Models</h3>
+<table>
+  <tr><th>Model</th><th>Security</th><th>Complexity</th><th>Cost</th><th>Best for</th></tr>
+  <tr><td><strong>Smart contract escrow</strong></td><td>Trustless, on-chain</td><td>Medium</td><td>~$0.01/tx on Base</td><td>✅ Primary — transparent, auditable</td></tr>
+  <tr><td>Platform-controlled wallet</td><td>Trust the platform</td><td>Low</td><td>Cheapest</td><td>MVP/fast launch, but centralized risk</td></tr>
+  <tr><td>Multisig (2-of-3)</td><td>Good</td><td>High UX friction</td><td>Higher gas</td><td>High-value tasks only</td></tr>
+</table>
+
+<h3>Gasless Transactions (Critical for UX)</h3>
+<p>Users should NEVER need to hold ETH for gas. Solutions:</p>
+<ul>
+  <li><strong>ERC-4337 Paymasters (Base):</strong> Platform sponsors gas for all user transactions. Coinbase provides a free paymaster for Base. Cost: fractions of a cent per tx.</li>
+  <li><strong>Coinbase Smart Wallet:</strong> Built-in gasless transactions on Base. Users sign with passkeys — no seed phrases, no gas tokens.</li>
+  <li><strong>Privy (now Stripe-owned):</strong> Embedded wallets with server-side signing. User logs in with email → gets a wallet automatically. Stripe acquiring Privy signals massive institutional validation of this approach.</li>
+</ul>
+
+<!-- ======================== UX ======================== -->
+<h2 id="ux">4. User Experience</h2>
+
+<h3>The Non-Crypto User Problem</h3>
+<p>The #1 risk of "fully crypto" is losing users who don't have USDC. Here's how to solve it:</p>
+
+<h3>On-Ramp Solutions</h3>
+<table>
+  <tr><th>Provider</th><th>Fees</th><th>KZ Available</th><th>Embed Widget</th><th>Notes</th></tr>
+  <tr><td><strong>Coinbase Onramp</strong></td><td>1–2.5%</td><td>Yes (Coinbase operates in KZ)</td><td>Yes (SDK)</td><td><span class="tag tag-green">Best for Base</span> Native integration</td></tr>
+  <tr><td>Transak</td><td>1–5%</td><td>Yes (150+ countries)</td><td>Yes</td><td>Wide coverage, solid KYC</td></tr>
+  <tr><td>MoonPay</td><td>3.5–4.5%</td><td>Limited</td><td>Yes</td><td>Premium feel, expensive</td></tr>
+  <tr><td>Ramp Network</td><td>0.49–2.9%</td><td>Unclear</td><td>Yes</td><td>Good rates, EU-focused</td></tr>
+  <tr><td>Stripe Crypto Onramp</td><td>~1.5%</td><td>Expanding</td><td>Yes</td><td><span class="tag tag-blue">Watch this</span> Stripe + Privy = powerful</td></tr>
+</table>
+
+<h3>Wallet Strategy — The Modern Approach</h3>
+<p>Forget "connect MetaMask." In 2026, the winning pattern is:</p>
+<ol>
+  <li><strong>Embedded wallets (Privy/Dynamic/Thirdweb):</strong> User signs up with email or Google → wallet created automatically in background. They never see seed phrases or wallet addresses.</li>
+  <li><strong>Smart wallets (Coinbase Smart Wallet):</strong> Passkey-based, gasless, recoverable. Looks like a normal app login.</li>
+  <li><strong>Optional external wallet:</strong> Power users can connect MetaMask/Coinbase Wallet if they want control.</li>
+</ol>
+
+<div class="callout">
+<strong>UX Reality Check:</strong> With embedded wallets + on-ramp widgets, a non-crypto user's experience is: <em>Sign up → Click "Add Funds" → Enter card details → Balance appears.</em> That's it. They never know they're using crypto. The UX gap with fiat is nearly closed.
+</div>
+
+<!-- ======================== EXAMPLES ======================== -->
+<h2 id="examples">5. Existing Platforms & Protocols</h2>
+
+<h3>Crypto Freelance Platforms</h3>
+<table>
+  <tr><th>Platform</th><th>Model</th><th>What works</th><th>What doesn't</th></tr>
+  <tr><td><strong>Braintrust</strong></td><td>BTRST token + USDC, 0% taker fee</td><td>Token incentives for network growth, enterprise clients (Nike, NASA)</td><td>Token adds speculation, governance overhead</td></tr>
+  <tr><td><strong>LaborX</strong></td><td>Multi-crypto escrow</td><td>Full escrow system, dispute resolution</td><td>Small user base, complex UX</td></tr>
+  <tr><td><strong>Dework</strong></td><td>USDC bounties, DAO-native</td><td>Great for open-source/DAO tasks</td><td>Shut down / pivoted — market was too niche</td></tr>
+  <tr><td><strong>Ethlance</strong></td><td>ETH-only, fully decentralized</td><td>Truly trustless</td><td>Terrible UX, almost no users</td></tr>
+</table>
+
+<p><strong>Key lesson:</strong> Every successful crypto marketplace keeps it simple (USDC, not custom tokens) and abstracts away complexity. The ones that went full-degen (custom tokens, complex governance) struggled.</p>
+
+<h3>AI Agent Payment Protocols</h3>
+<ul>
+  <li><strong>Morpheus (MOR):</strong> Decentralized AI compute marketplace. Uses token staking for compute providers. Relevant for infra but not for task completion payments.</li>
+  <li><strong>Autonolas (OLAS):</strong> Autonomous agent services. Agents stake tokens and get rewarded. More about agent-infrastructure than human→agent task payments.</li>
+  <li><strong>Nevermined:</strong> AI agent payments protocol. Pay-per-task with crypto. Closest to what Agentic needs.</li>
+  <li><strong>Skyfire:</strong> USDC-based AI agent payment network. Agents have wallets, can pay each other. Very relevant reference.</li>
+  <li><strong>Coinbase AgentKit:</strong> SDK for giving AI agents crypto wallets on Base. Lets agents hold, send, and receive USDC. <span class="tag tag-green">Directly useful</span></li>
+</ul>
+
+<div class="callout">
+<strong>Agent-to-agent payments are real and growing fast.</strong> Coinbase's AgentKit + Base is becoming the de facto standard. Building on Base aligns with this ecosystem. When AI agents hire sub-agents, they can pay each other in USDC programmatically — no human in the loop.
+</div>
+
+<!-- ======================== ESCROW ======================== -->
+<h2 id="escrow">6. Smart Contract Escrow</h2>
+
+<h3>Contract Pattern</h3>
+<pre style="background: var(--surface2); padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 0.88em; color: var(--text); line-height: 1.5;"><code>// Simplified escrow logic (Solidity, Base/EVM)
+contract AgenticEscrow {
+    enum Status { Open, Funded, InProgress, Completed, Disputed, Refunded }
+    
+    struct Task {
+        address client;       // who posted the task
+        address agent;        // assigned AI agent's wallet
+        uint256 amount;       // USDC amount (6 decimals)
+        uint256 platformFee;  // e.g., 10%
+        Status status;
+        uint256 deadline;
+    }
+    
+    // Key functions:
+    // createTask() → client deposits USDC → locked
+    // assignAgent() → platform assigns agent
+    // completeTask() → client confirms → USDC released minus fee
+    // disputeTask() → either party → funds locked → arbiter resolves
+    // refundTask() → timeout or arbiter decision → USDC returned
+    // emergencyWithdraw() → admin multisig, timelocked
+}</code></pre>
+
+<h3>Costs & Risks</h3>
+<table>
+  <tr><th>Item</th><th>Cost</th><th>Notes</th></tr>
+  <tr><td>Development</td><td>$2–5K (or DIY)</td><td>Simple escrow is ~200 lines of Solidity</td></tr>
+  <tr><td>Audit</td><td>$5–15K</td><td>Essential. Use Code4rena, Sherlock, or Trail of Bits. For simple contracts, automated auditing (Slither + manual review) may suffice initially.</td></tr>
+  <tr><td>Gas per task (Base)</td><td>$0.005–0.02</td><td>Create + fund + release = ~3 txs × ~$0.005</td></tr>
+  <tr><td>Existing templates</td><td>Free</td><td>OpenZeppelin has Escrow.sol, PaymentSplitter. Thirdweb has marketplace contracts. Fork and customize.</td></tr>
+</table>
+
+<div class="callout callout-warn">
+<strong>⚠️ Don't over-engineer V1.</strong> Start with a platform-controlled wallet (centralized escrow via backend) for MVP speed. Move to smart contract escrow in V2 once you have users. The smart contract adds trust but also complexity — don't let it slow your launch.
+</div>
+
+<!-- ======================== REGULATORY ======================== -->
+<h2 id="regulatory">7. Regulatory Risk</h2>
+
+<h3>Kazakhstan (Home Base)</h3>
+<ul>
+  <li><strong>AIFC Registration:</strong> If handling crypto custody/escrow, you likely need AFSA (Astana Financial Services Authority) licensing as a Digital Asset Trading Facility (DATF) or Digital Asset Service Provider (DASP). Cost: ~$5–15K + compliance setup.</li>
+  <li><strong>Outside AIFC:</strong> Operating crypto services without AIFC license is a gray area. Many KZ startups operate without explicit licensing while under $1M volume, but it's a risk.</li>
+  <li><strong>Practical approach:</strong> Start without a license (low volume), apply for AIFC license when revenue justifies it. AIFC is actively welcoming crypto startups.</li>
+</ul>
+
+<h3>US Users</h3>
+<ul>
+  <li><strong>MSB (Money Services Business):</strong> If you custody user funds and serve US persons, FinCEN may classify you as an MSB. This requires registration + AML/KYC.</li>
+  <li><strong>Mitigation:</strong> Use non-custodial smart contracts (users interact directly with the contract). Platform never holds funds → arguably not an MSB. This is the approach most crypto marketplaces take.</li>
+  <li><strong>State licenses:</strong> Money transmitter licenses per state are a nightmare. Avoid by being non-custodial.</li>
+</ul>
+
+<h3>EU Users</h3>
+<ul>
+  <li><strong>MiCA (Markets in Crypto-Assets):</strong> Fully in effect since 2025. If you provide crypto custody services to EU users, you need CASP (Crypto-Asset Service Provider) licensing.</li>
+  <li><strong>Mitigation:</strong> Same — non-custodial escrow contracts mean you're not a CASP. On-ramp providers (Transak, etc.) handle their own MiCA compliance.</li>
+</ul>
+
+<div class="callout">
+<strong>The golden rule:</strong> Non-custodial = minimal licensing. The smart contract holds the funds, not you. Users interact with the contract directly. Your platform is a frontend + matching service, not a money transmitter. This is how Uniswap, OpenSea, and every successful crypto marketplace operates.
+</div>
+
+<!-- ======================== COMPARISON ======================== -->
+<h2 id="comparison">8. Head-to-Head Comparison</h2>
+
+<table>
+  <tr>
+    <th>Dimension</th>
+    <th>🟣 Full Crypto<br><small>(USDC on Base)</small></th>
+    <th>🔵 Hybrid<br><small>(LS + crypto withdraw)</small></th>
+    <th>⚪ Full Fiat<br><small>(LemonSqueezy only)</small></th>
+  </tr>
+  <tr>
+    <td><strong>Setup complexity</strong></td>
+    <td><span class="neutral">Medium</span> — smart contracts + on-ramp integration</td>
+    <td><span class="lose">High</span> — two payment systems to maintain</td>
+    <td><span class="win">Low</span> — just LS checkout</td>
+  </tr>
+  <tr>
+    <td><strong>Fee per $100 task</strong></td>
+    <td><span class="win">$0.01–0.05</span></td>
+    <td><span class="lose">$5–7</span> (LS fees)</td>
+    <td><span class="lose">$5–7</span> (LS fees)</td>
+  </tr>
+  <tr>
+    <td><strong>Platform revenue on $100</strong></td>
+    <td><span class="win">$10</span> (keep your full 10%)</td>
+    <td><span class="neutral">$5–7</span> (after LS cut)</td>
+    <td><span class="lose">$5–7</span> (after LS cut)</td>
+  </tr>
+  <tr>
+    <td><strong>Tax burden (platform)</strong></td>
+    <td><span class="win">Low</span> — pay CIT on commission only, no VAT on crypto</td>
+    <td><span class="neutral">Medium</span> — LS handles some, crypto portion is on you</td>
+    <td><span class="neutral">Medium</span> — LS handles VAT, you pay CIT</td>
+  </tr>
+  <tr>
+    <td><strong>Global access</strong></td>
+    <td><span class="win">195 countries</span> — anyone with internet</td>
+    <td><span class="neutral">Mixed</span> — LS covers ~130 countries</td>
+    <td><span class="lose">~130 countries</span> — LS payment method limits</td>
+  </tr>
+  <tr>
+    <td><strong>UX friction (normie)</strong></td>
+    <td><span class="neutral">Medium</span> — needs on-ramp (card → USDC)</td>
+    <td><span class="neutral">Low-Medium</span> — card for in, crypto for out</td>
+    <td><span class="win">Low</span> — just a card</td>
+  </tr>
+  <tr>
+    <td><strong>UX friction (crypto user)</strong></td>
+    <td><span class="win">Zero</span> — native experience</td>
+    <td><span class="lose">Bad</span> — forced through fiat checkout first</td>
+    <td><span class="lose">Terrible</span> — can't use crypto at all</td>
+  </tr>
+  <tr>
+    <td><strong>Agent payouts</strong></td>
+    <td><span class="win">Instant</span> — USDC direct, no minimums</td>
+    <td><span class="neutral">Delayed</span> — need off-ramp or crypto withdraw step</td>
+    <td><span class="lose">Slow</span> — bank transfers, 3–7 day settlement</td>
+  </tr>
+  <tr>
+    <td><strong>Agent-to-agent payments</strong></td>
+    <td><span class="win">Native</span> — agents pay sub-agents on-chain</td>
+    <td><span class="lose">Impossible</span> — fiat can't do this</td>
+    <td><span class="lose">Impossible</span></td>
+  </tr>
+  <tr>
+    <td><strong>Escrow capability</strong></td>
+    <td><span class="win">Smart contract</span> — trustless, transparent</td>
+    <td><span class="neutral">Manual</span> — you hold funds in DB</td>
+    <td><span class="lose">None</span> — LS doesn't do escrow</td>
+  </tr>
+  <tr>
+    <td><strong>Regulatory risk</strong></td>
+    <td><span class="neutral">Medium</span> — non-custodial helps, gray areas exist</td>
+    <td><span class="neutral">Medium</span> — LS covers fiat side</td>
+    <td><span class="win">Low</span> — LS handles everything</td>
+  </tr>
+  <tr>
+    <td><strong>Time to implement</strong></td>
+    <td><span class="neutral">3–5 weeks</span></td>
+    <td><span class="lose">4–6 weeks</span> (two systems)</td>
+    <td><span class="win">1–2 weeks</span></td>
+  </tr>
+  <tr>
+    <td><strong>Scalability</strong></td>
+    <td><span class="win">Infinite</span> — Base handles millions of txs</td>
+    <td><span class="neutral">Limited by LS</span></td>
+    <td><span class="lose">Limited by LS rate limits + countries</span></td>
+  </tr>
+  <tr>
+    <td><strong>Competitive moat</strong></td>
+    <td><span class="win">Strong</span> — crypto-native AI marketplace = unique</td>
+    <td><span class="neutral">Weak</span> — worst of both worlds</td>
+    <td><span class="lose">None</span> — same as everyone else</td>
+  </tr>
+</table>
+
+<!-- ======================== RECOMMENDATION ======================== -->
+<h2 id="recommendation">9. Recommendation</h2>
+
+<div class="verdict">
+<h3>🎯 My Opinionated Take</h3>
+<p><strong>Go crypto-native on Base. Kill LemonSqueezy.</strong></p>
+
+<p>Here's why, bluntly:</p>
+
+<ol>
+  <li><strong>LemonSqueezy is wrong for marketplaces.</strong> It's a MoR for SaaS — it doesn't do escrow, doesn't support marketplace payouts, and takes 5% for something you don't need. You'd be forcing a square peg into a round hole.</li>
+  
+  <li><strong>The hybrid approach is the worst option.</strong> Two payment systems = double the complexity, double the bugs, confused users. "Pay with card, withdraw in crypto" sounds nice but creates accounting nightmares.</li>
+  
+  <li><strong>Crypto + embedded on-ramps = best of both worlds.</strong> Users with cards use Coinbase Onramp to buy USDC (1–2.5% fee — cheaper than LS). Crypto users deposit directly. Everyone lives in the same USDC world internally.</li>
+  
+  <li><strong>AI agents NEED crypto wallets.</strong> This is the killer argument. Your agents need to receive payments, potentially pay for sub-tasks, hold balances. Crypto wallets are the only way to give autonomous agents financial capability. Coinbase AgentKit exists specifically for this.</li>
+  
+  <li><strong>KZ is the right jurisdiction.</strong> AIFC is actively courting crypto startups. The regulatory environment is favorable. You're not doing this from the US where it would be a headache.</li>
+  
+  <li><strong>Fees matter in a marketplace.</strong> Saving 5% on every transaction compounds massively. That's the difference between agents choosing your platform vs competitors.</li>
+</ol>
+
+<p><strong>The only real risk</strong> is UX friction for the first-time user who's never touched crypto. But with Privy embedded wallets + Coinbase Onramp, this is a solved problem in 2026. The user experience is: email signup → enter card → funds appear → post task. They never see a wallet address.</p>
+</div>
+
+<!-- ======================== ROADMAP ======================== -->
+<h2 id="roadmap">10. Implementation Roadmap</h2>
+
+<div class="roadmap">
+  <div class="phase">
+    <div class="phase-title">Phase 1: Centralized Crypto MVP (Week 1–2)</div>
+    <div class="phase-time">Get payments working, fast</div>
+    <ul>
+      <li>Platform-controlled USDC wallet on Base (no smart contracts yet)</li>
+      <li>Users deposit USDC to platform address, get credited in DB</li>
+      <li>Backend handles escrow logic (lock on assign, release on complete)</li>
+      <li>Integrate Privy for embedded wallets (email signup → wallet)</li>
+      <li>Integrate Coinbase Onramp widget (card → USDC)</li>
+      <li>Agent payouts: direct USDC transfer from platform wallet</li>
+    </ul>
+  </div>
+  
+  <div class="phase">
+    <div class="phase-title">Phase 2: Smart Contract Escrow (Week 3–5)</div>
+    <div class="phase-time">Trustless escrow, lower risk</div>
+    <ul>
+      <li>Deploy escrow contract on Base (fork OpenZeppelin Escrow + customize)</li>
+      <li>Implement: createTask → fundTask → completeTask → disputeTask flow</li>
+      <li>Platform fee taken automatically on release</li>
+      <li>ERC-4337 paymaster for gasless UX (Coinbase free paymaster on Base)</li>
+      <li>Basic dispute resolution (admin multisig resolves)</li>
+      <li>Automated audit with Slither + manual review</li>
+    </ul>
+  </div>
+  
+  <div class="phase">
+    <div class="phase-title">Phase 3: Agent Wallets (Week 5–7)</div>
+    <div class="phase-time">Agents as first-class financial actors</div>
+    <ul>
+      <li>Integrate Coinbase AgentKit — each AI agent gets a Base wallet</li>
+      <li>Agents can: receive task payments, pay sub-agents, hold USDC balance</li>
+      <li>Agent-to-agent payment flow for complex multi-step tasks</li>
+      <li>Agent reputation tied to on-chain payment history</li>
+    </ul>
+  </div>
+  
+  <div class="phase">
+    <div class="phase-title">Phase 4: Scale & Comply (Week 8+)</div>
+    <div class="phase-time">Growth mode</div>
+    <ul>
+      <li>Professional smart contract audit ($5–15K, Sherlock or Code4rena)</li>
+      <li>AIFC DASP license application (if volume warrants)</li>
+      <li>Add more on-ramp providers (Transak, Ramp) for coverage</li>
+      <li>Multi-chain support if needed (Arbitrum as backup)</li>
+      <li>Advanced dispute resolution (staked arbiters, reputation-weighted voting)</li>
+    </ul>
+  </div>
+</div>
+
+<h3>Tech Stack Summary</h3>
+<table>
+  <tr><th>Component</th><th>Choice</th><th>Why</th></tr>
+  <tr><td>Chain</td><td><strong>Base</strong></td><td>Cheapest EVM L2, Coinbase ecosystem, gasless paymasters</td></tr>
+  <tr><td>Stablecoin</td><td><strong>USDC</strong></td><td>Regulated, trusted, native on Base, Circle backing</td></tr>
+  <tr><td>Embedded wallets</td><td><strong>Privy</strong> (or Thirdweb)</td><td>Email → wallet, Stripe-backed, best DX</td></tr>
+  <tr><td>On-ramp</td><td><strong>Coinbase Onramp</strong> + Transak</td><td>Native Base integration, KZ support</td></tr>
+  <tr><td>Smart wallets</td><td><strong>Coinbase Smart Wallet</strong></td><td>Passkey login, gasless, no seed phrases</td></tr>
+  <tr><td>Agent wallets</td><td><strong>Coinbase AgentKit</strong></td><td>Purpose-built for AI agents on Base</td></tr>
+  <tr><td>Gas sponsorship</td><td><strong>Coinbase Paymaster</strong> (free on Base)</td><td>Users never pay gas</td></tr>
+  <tr><td>Escrow</td><td><strong>Custom Solidity</strong> (OZ base)</td><td>Simple, auditable, platform-specific logic</td></tr>
+</table>
+
+<hr style="margin: 48px 0; border-color: var(--border);">
+<p style="color: var(--muted); text-align: center; font-size: 0.9em;">
+  Research compiled March 2026 · Agentic Payment Architecture · Built by Claw 🧊
+</p>
+
+</div>
+</body>
+</html>

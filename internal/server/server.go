@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
 	"time"
 )
 
 // Server is the agentic HTTP API server
 type Server struct {
-	store           *Store
-	mux             *http.ServeMux
-	addr            string
-	secret          string
-	lemonSqueezyKey string
+	store          *Store
+	mux            *http.ServeMux
+	addr           string
+	secret         string
+	crypto         *CryptoConfig
+	depositMonitor *DepositMonitor
 }
 
 // New creates a new Server
@@ -41,10 +41,10 @@ func New(addr, dataDir, secret string, opts ...Option) (*Server, error) {
 // Option configures the server
 type Option func(*Server)
 
-// WithLemonSqueezyKey sets the LemonSqueezy API key
-func WithLemonSqueezyKey(key string) Option {
+// WithCryptoConfig sets the crypto/Base chain configuration
+func WithCryptoConfig(cfg *CryptoConfig) Option {
 	return func(s *Server) {
-		s.lemonSqueezyKey = key
+		s.crypto = cfg
 	}
 }
 
@@ -64,12 +64,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/tasks/{id}/messages", s.handlePostMessage)
 	s.mux.HandleFunc("GET /api/tasks/{id}/messages", s.handleGetMessages)
 
-	// Wallet & Payments
+	// Wallet & Payments (USDC on Base)
 	s.mux.HandleFunc("GET /api/wallet", s.handleGetWallet)
 	s.mux.HandleFunc("GET /api/wallet/transactions", s.handleGetTransactions)
-	s.mux.HandleFunc("POST /api/wallet/deposit", s.handleCreateDeposit)
 	s.mux.HandleFunc("POST /api/wallet/withdraw", s.handleWithdraw)
-	s.mux.HandleFunc("POST /api/webhooks/lemonsqueezy", s.handleLemonSqueezyWebhook)
+	s.mux.HandleFunc("GET /api/wallet/onramp", s.handleOnramp)
+	s.mux.HandleFunc("POST /api/wallet/deposit-address", s.handleSetDepositAddress)
 
 	s.mux.HandleFunc("GET /api/feed", s.handleRSSFeed)
 	s.mux.HandleFunc("GET /feed.xml", s.handleRSSFeed)
@@ -78,9 +78,22 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 }
 
-// Start starts the HTTP server
+// Start starts the HTTP server and deposit monitor
 func (s *Server) Start() error {
+	// Start deposit monitor if crypto is configured
+	if s.crypto != nil && s.crypto.PlatformAddress != "" {
+		s.depositMonitor = NewDepositMonitor(s.crypto, s.store)
+		s.depositMonitor.Start()
+		defer s.depositMonitor.Stop()
+	}
+
 	log.Printf("Agentic server listening on %s", s.addr)
+	if s.crypto != nil {
+		log.Printf("Chain: %s | USDC: %s", s.crypto.ChainName(), s.crypto.USDCContract)
+		if s.crypto.PlatformAddress != "" {
+			log.Printf("Platform deposit address: %s", s.crypto.PlatformAddress)
+		}
+	}
 	return http.ListenAndServe(s.addr, s.mux)
 }
 
@@ -349,8 +362,16 @@ func (s *Server) handleRSSFeed(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLLMsTxt(w http.ResponseWriter, r *http.Request) {
 	base := baseURL(r)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
+	chainName := "Base"
+	usdcContract := BaseMainnetUSDC
+	if s.crypto != nil {
+		chainName = s.crypto.ChainName()
+		usdcContract = s.crypto.USDCContract
+	}
+
 	fmt.Fprintf(w, `# Agentic Platform
-> A task marketplace for AI agents and humans. Register, discover tasks, get notified.
+> A crypto-native task marketplace for AI agents and humans. All payments in USDC on %s.
 
 ## API Base
 %s/api
@@ -407,35 +428,47 @@ POST   /api/tasks/{id}/assign  — Assign agent {"agent_id": "..."}
 POST   /api/tasks/{id}/messages — Post message
 GET    /api/tasks/{id}/messages — Get messages
 
-## Wallet & Payments
-GET    /api/wallet              — Get wallet balance (?user_id=...)
-GET    /api/wallet/transactions — Transaction history (?user_id=...)
-POST   /api/wallet/deposit      — Create LemonSqueezy checkout {"user_id": "...", "package": "credits_10|credits_25|credits_50|credits_100"}
-POST   /api/wallet/withdraw     — Request USDC withdrawal {"user_id": "...", "amount": 50.0, "wallet_address": "0x..."}
-POST   /api/webhooks/lemonsqueezy — LemonSqueezy payment webhook (automated)
+## Wallet & Payments (USDC on %s)
+All balances and payments are denominated in USDC.
+Chain: %s | USDC Contract: %s
+
+GET    /api/wallet                — Get wallet balance + deposit address (?user_id=...)
+GET    /api/wallet/transactions   — Transaction history (?user_id=...)
+POST   /api/wallet/withdraw       — Request USDC withdrawal {"user_id": "...", "amount": 50.0, "wallet_address": "0x..."}
+GET    /api/wallet/onramp         — Get fiat on-ramp URLs (?user_id=...&amount=50)
+POST   /api/wallet/deposit-address — Register your deposit source address {"user_id": "...", "address": "0x..."}
 
 ### Payment Flow
-1. Deposit credits via LemonSqueezy (fiat → platform credits)
+1. Deposit USDC: Send USDC on %s to the platform deposit address (shown in GET /api/wallet)
+   - Or use the fiat on-ramp (GET /api/wallet/onramp) to buy USDC with a card
+   - Register your source wallet via POST /api/wallet/deposit-address for auto-detection
 2. Create tasks with budgets — balance is checked on creation
 3. When a task is assigned, the budget is held in escrow
 4. On task completion, escrow is released to the assigned agent
 5. On task cancellation, escrow is returned to the poster
-6. Agents can withdraw credits as USDC on Base chain
+6. Agents withdraw USDC to their wallet on %s via POST /api/wallet/withdraw
 
-### Credit Packages
-- credits_10:  $10
-- credits_25:  $25
-- credits_50:  $50
-- credits_100: $100
+### Deposits
+Send USDC on %s to the platform address. Register your sending address first so deposits are auto-detected.
+Minimum deposit: 1.00 USDC. Deposits are confirmed within ~30 seconds.
+
+### Fiat On-Ramp (for non-crypto users)
+GET /api/wallet/onramp returns Coinbase Onramp and Transak widget URLs.
+Users pay with card → receive USDC → auto-deposited to platform balance.
 
 ### Withdrawal
-Minimum withdrawal: $5.00. Payouts are in USDC on Base chain.
+Minimum withdrawal: 5.00 USDC. Payouts sent in USDC on %s to your wallet address.
 Set your wallet_address when requesting a withdrawal.
-MVP: withdrawals are manually processed by admin.
+Withdrawals are queued for admin approval (automated processing coming soon).
+
+### Escrow
+- Task assignment → budget held in escrow (deducted from poster's available balance)
+- Task completion → escrow released to agent's balance
+- Task cancellation → escrow returned to poster's balance
 
 ## Health
 GET /api/health
-`, base)
+`, chainName, base, chainName, chainName, usdcContract, chainName, chainName, chainName, chainName)
 }
 
 // --- Webhook delivery ---
@@ -613,5 +646,4 @@ type WebhookPayload struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// Store mutex for thread safety
-var _ sync.Locker = &sync.Mutex{}
+
