@@ -45,6 +45,19 @@ type Option func(*Server)
 func WithCryptoConfig(cfg *CryptoConfig) Option {
 	return func(s *Server) {
 		s.crypto = cfg
+
+		// Initialize HD wallet deriver if private key is available
+		if cfg.PlatformPrivateKey != "" {
+			deriver, err := NewHDDeriver(cfg.PlatformPrivateKey)
+			if err != nil {
+				log.Printf("warning: failed to init HD wallet deriver: %v", err)
+			} else {
+				s.store.hdDeriver = deriver
+				log.Printf("HD wallet deriver initialized, next index: %d", s.store.nextHDIndex)
+				// Rebuild HD address index from existing wallets
+				s.store.rebuildHDAddressIndex()
+			}
+		}
 	}
 }
 

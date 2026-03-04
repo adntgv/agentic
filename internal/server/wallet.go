@@ -14,13 +14,15 @@ import (
 
 // Wallet holds a user's USDC credit balance
 type Wallet struct {
-	UserID         string  `json:"user_id"`
-	Balance        float64 `json:"balance"`         // available USDC credits
-	EscrowHeld     float64 `json:"escrow_held"`     // frozen in escrow
-	WalletAddress  string  `json:"wallet_address"`  // Base chain address for withdrawals
-	DepositAddress string  `json:"deposit_address"` // registered source address for deposit matching
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	UserID            string  `json:"user_id"`
+	Balance           float64 `json:"balance"`              // available USDC credits
+	EscrowHeld        float64 `json:"escrow_held"`          // frozen in escrow
+	WalletAddress     string  `json:"wallet_address"`       // Base chain address for withdrawals
+	DepositAddress    string  `json:"deposit_address"`      // registered source address for deposit matching
+	HDIndex           int     `json:"hd_index"`             // HD derivation index for per-user deposit address
+	UniqueDepositAddr string  `json:"unique_deposit_addr"`  // derived HD deposit address for this user
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // Transaction is a double-entry ledger record
@@ -58,12 +60,34 @@ func (s *Store) GetOrCreateWallet(userID string) Wallet {
 	}
 
 	now := time.Now().UTC()
+
+	// Assign next HD index
+	hdIndex := s.nextHDIndex
+	s.nextHDIndex++
+
 	w := Wallet{
 		UserID:    userID,
 		Balance:   0,
+		HDIndex:   hdIndex,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+
+	// Derive unique deposit address if HD wallet is configured
+	if s.hdDeriver != nil {
+		addr, err := s.hdDeriver.DeriveAddress(hdIndex)
+		if err != nil {
+			log.Printf("wallet: failed to derive HD address for user %s index %d: %v", userID, hdIndex, err)
+		} else {
+			w.UniqueDepositAddr = addr
+			// Index the derived address for deposit matching
+			if s.hdAddressIndex == nil {
+				s.hdAddressIndex = make(map[string]string)
+			}
+			s.hdAddressIndex[strings.ToLower(addr)] = userID
+		}
+	}
+
 	s.wallets[userID] = w
 	s.saveToDisk()
 	return w
@@ -108,24 +132,51 @@ func (s *Store) SetDepositAddress(userID, address string) Wallet {
 }
 
 // FindUserByDepositAddress finds which user registered a given source address
+// It checks both registered source addresses AND HD-derived deposit addresses
 func (s *Store) FindUserByDepositAddress(addr string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	lower := strings.ToLower(addr)
+
+	// Check registered source addresses
 	if s.depositAddressIndex != nil {
-		if userID, ok := s.depositAddressIndex[strings.ToLower(addr)]; ok {
+		if userID, ok := s.depositAddressIndex[lower]; ok {
+			return userID
+		}
+	}
+
+	// Check HD-derived deposit addresses (deposit TO this address)
+	if s.hdAddressIndex != nil {
+		if userID, ok := s.hdAddressIndex[lower]; ok {
 			return userID
 		}
 	}
 
 	// Fallback: scan wallets (slower)
-	lower := strings.ToLower(addr)
 	for _, w := range s.wallets {
 		if strings.ToLower(w.DepositAddress) == lower {
 			return w.UserID
 		}
+		if strings.ToLower(w.UniqueDepositAddr) == lower {
+			return w.UserID
+		}
 	}
 	return ""
+}
+
+// GetAllHDDepositAddresses returns all derived deposit addresses for monitoring
+func (s *Store) GetAllHDDepositAddresses() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var addrs []string
+	for _, w := range s.wallets {
+		if w.UniqueDepositAddr != "" {
+			addrs = append(addrs, w.UniqueDepositAddr)
+		}
+	}
+	return addrs
 }
 
 // IsTransactionProcessed checks if a tx hash has already been credited
@@ -391,23 +442,33 @@ func (s *Server) handleGetWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	wallet := s.store.GetOrCreateWallet(userID)
 
-	// Include deposit info
+	// Include deposit info - prefer user's unique HD address, fallback to platform address
 	depositAddr := ""
-	if s.crypto != nil {
+	if wallet.UniqueDepositAddr != "" {
+		depositAddr = wallet.UniqueDepositAddr
+	} else if s.crypto != nil {
 		depositAddr = s.crypto.GetDepositAddress()
 	}
 
+	platformAddr := ""
+	if s.crypto != nil {
+		platformAddr = s.crypto.GetDepositAddress()
+	}
+
 	writeJSON(w, 200, map[string]interface{}{
-		"user_id":         wallet.UserID,
-		"balance":         wallet.Balance,
-		"escrow_held":     wallet.EscrowHeld,
-		"wallet_address":  wallet.WalletAddress,
-		"deposit_address": depositAddr,
-		"deposit_source":  wallet.DepositAddress,
-		"currency":        "USDC",
-		"chain":           s.chainName(),
-		"created_at":      wallet.CreatedAt,
-		"updated_at":      wallet.UpdatedAt,
+		"user_id":              wallet.UserID,
+		"balance":              wallet.Balance,
+		"escrow_held":          wallet.EscrowHeld,
+		"wallet_address":       wallet.WalletAddress,
+		"deposit_address":      depositAddr,
+		"platform_address":     platformAddr,
+		"deposit_source":       wallet.DepositAddress,
+		"unique_deposit_addr":  wallet.UniqueDepositAddr,
+		"hd_index":             wallet.HDIndex,
+		"currency":             "USDC",
+		"chain":                s.chainName(),
+		"created_at":           wallet.CreatedAt,
+		"updated_at":           wallet.UpdatedAt,
 	})
 }
 

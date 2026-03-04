@@ -237,21 +237,44 @@ func (dm *DepositMonitor) checkDeposits() {
 		return
 	}
 
-	for _, dep := range deposits {
-		log.Printf("crypto: detected deposit of %.6f USDC from %s (tx: %s)",
-			dep.Amount, dep.From, dep.TxHash)
-
-		// Find user by their registered deposit source address
-		userID := dm.store.FindUserByDepositAddress(dep.From)
-		if userID == "" {
-			log.Printf("crypto: unknown sender %s, skipping (users must register source address)", dep.From)
+	// Also query transfers to HD-derived addresses
+	hdAddresses := dm.store.GetAllHDDepositAddresses()
+	for _, hdAddr := range hdAddresses {
+		hdDeposits, err := dm.queryTransferEventsToAddress(dm.lastBlock+1, currentBlock, hdAddr)
+		if err != nil {
+			log.Printf("crypto: failed to query HD address %s events: %v", hdAddr, err)
 			continue
 		}
+		deposits = append(deposits, hdDeposits...)
+	}
+
+	for _, dep := range deposits {
+		log.Printf("crypto: detected deposit of %.6f USDC to %s from %s (tx: %s)",
+			dep.Amount, dep.To, dep.From, dep.TxHash)
 
 		// Check if this tx was already processed
 		if dm.store.IsTransactionProcessed(dep.TxHash) {
 			log.Printf("crypto: tx %s already processed, skipping", dep.TxHash)
 			continue
+		}
+
+		// For HD-derived addresses, match by destination (the HD address IS the user's address)
+		// For platform address, match by sender (registered source address)
+		var userID string
+		if strings.EqualFold(dep.To, dm.config.PlatformAddress) {
+			// Legacy: match by sender's registered source address
+			userID = dm.store.FindUserByDepositAddress(dep.From)
+			if userID == "" {
+				log.Printf("crypto: unknown sender %s to platform address, skipping", dep.From)
+				continue
+			}
+		} else {
+			// HD address: match by destination
+			userID = dm.store.FindUserByDepositAddress(dep.To)
+			if userID == "" {
+				log.Printf("crypto: unknown HD destination %s, skipping", dep.To)
+				continue
+			}
 		}
 
 		// Credit the user
@@ -344,6 +367,60 @@ func (dm *DepositMonitor) queryTransferEvents(fromBlock, toBlock uint64) ([]Depo
 		})
 	}
 
+	return deposits, nil
+}
+
+// queryTransferEventsToAddress queries USDC Transfer events to a specific address
+func (dm *DepositMonitor) queryTransferEventsToAddress(fromBlock, toBlock uint64, toAddr string) ([]Deposit, error) {
+	paddedAddr := "0x000000000000000000000000" + strings.ToLower(toAddr[2:])
+
+	params := []interface{}{
+		map[string]interface{}{
+			"fromBlock": fmt.Sprintf("0x%x", fromBlock),
+			"toBlock":   fmt.Sprintf("0x%x", toBlock),
+			"address":   dm.config.USDCContract,
+			"topics": []interface{}{
+				TransferEventSig,
+				nil,
+				paddedAddr,
+			},
+		},
+	}
+
+	result, err := ethRPCCallArray(dm.config.BaseRPCURL, "eth_getLogs", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var deposits []Deposit
+	for _, logEntry := range result {
+		logMap, ok := logEntry.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		topics, _ := logMap["topics"].([]interface{})
+		if len(topics) < 3 {
+			continue
+		}
+		data, _ := logMap["data"].(string)
+		txHash, _ := logMap["transactionHash"].(string)
+		blockHex, _ := logMap["blockNumber"].(string)
+		fromTopic, _ := topics[1].(string)
+		from := "0x" + fromTopic[26:]
+		rawAmount := new(big.Int)
+		if len(data) > 2 {
+			rawAmount.SetString(data[2:], 16)
+		}
+		amount := RawToUSDC(rawAmount)
+		block, _ := parseHexUint64(blockHex)
+		deposits = append(deposits, Deposit{
+			From:   from,
+			To:     toAddr,
+			Amount: amount,
+			TxHash: txHash,
+			Block:  block,
+		})
+	}
 	return deposits, nil
 }
 

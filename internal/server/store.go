@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -23,6 +24,9 @@ type Store struct {
 	withdrawals         map[string]WithdrawalRequest   // withdrawalID -> request
 	processedTxs        map[string]bool                // on-chain tx hashes already credited
 	depositAddressIndex map[string]string              // lowercase address -> userID
+	hdDeriver           *HDDeriver                     // HD wallet key deriver (nil if not configured)
+	hdAddressIndex      map[string]string              // HD derived address -> userID
+	nextHDIndex         int                            // next available HD derivation index
 }
 
 // NewStore creates a new Store, loading existing data from disk
@@ -41,6 +45,7 @@ func NewStore(dataDir string) (*Store, error) {
 		withdrawals:         make(map[string]WithdrawalRequest),
 		processedTxs:        make(map[string]bool),
 		depositAddressIndex: make(map[string]string),
+		hdAddressIndex:      make(map[string]string),
 	}
 
 	// Load existing data
@@ -263,6 +268,8 @@ type storeData struct {
 	Withdrawals         map[string]WithdrawalRequest  `json:"withdrawals,omitempty"`
 	ProcessedTxs        map[string]bool               `json:"processed_txs,omitempty"`
 	DepositAddressIndex map[string]string             `json:"deposit_address_index,omitempty"`
+	HDAddressIndex      map[string]string             `json:"hd_address_index,omitempty"`
+	NextHDIndex         int                           `json:"next_hd_index,omitempty"`
 }
 
 func (s *Store) saveToDisk() {
@@ -275,6 +282,8 @@ func (s *Store) saveToDisk() {
 		Withdrawals:         s.withdrawals,
 		ProcessedTxs:        s.processedTxs,
 		DepositAddressIndex: s.depositAddressIndex,
+		HDAddressIndex:      s.hdAddressIndex,
+		NextHDIndex:         s.nextHDIndex,
 	}
 	b, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -316,6 +325,30 @@ func (s *Store) loadFromDisk() {
 	if data.DepositAddressIndex != nil {
 		s.depositAddressIndex = data.DepositAddressIndex
 	}
+	if data.HDAddressIndex != nil {
+		s.hdAddressIndex = data.HDAddressIndex
+	}
+	if data.NextHDIndex > 0 {
+		s.nextHDIndex = data.NextHDIndex
+	}
+}
+
+// rebuildHDAddressIndex rebuilds the HD address lookup index from existing wallets
+func (s *Store) rebuildHDAddressIndex() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.hdAddressIndex = make(map[string]string)
+	for _, w := range s.wallets {
+		if w.UniqueDepositAddr != "" {
+			s.hdAddressIndex[strings.ToLower(w.UniqueDepositAddr)] = w.UserID
+		}
+	}
+}
+
+// SetHDDeriver sets the HD wallet deriver (called during server init)
+func (s *Store) SetHDDeriver(d *HDDeriver) {
+	s.hdDeriver = d
 }
 
 // --- Utilities ---
